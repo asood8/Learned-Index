@@ -1,0 +1,15 @@
+# Compiled binaries
+cpp/benchmark
+*.o
+*.out
+
+# Generated datasets — regenerate with: python3 python/data_gen.py
+data/*.bin
+
+# Python
+__pycache__/
+*.pyc
+
+# OS / editor cruft
+.DS_Store
+*.swp
