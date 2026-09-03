@@ -97,8 +97,64 @@ faster** than it. Three cheap-to-search lines did what one line
 structurally couldn't — this is Phase 2's whole thesis, borne out in
 a real, verified number instead of a theoretical claim.
 
-## Next: Phase 3
+## Phase 3 — inserts via a gapped array
 
-Handle inserts without shifting the whole array — a gapped array,
-leaving small unused slots scattered through the sorted data on
-purpose.
+`cpp/gapped_array.h` spreads real keys across an array larger than
+necessary (density 0.7 → 30% left as gaps), so most inserts slide
+into a nearby empty slot instead of shifting everything after them.
+The Phase 2 segmentation algorithm is reused unchanged, just refit
+against each key's *gapped* position instead of its dense rank.
+
+**A real bug, found the same way as every other phase — by checking:**
+the first working version passed every "did the gap-fill logic work"
+check, but the *final* correctness check (are all 1M keys still
+findable after 100k inserts) failed for 11 keys. Zero rebalances had
+been triggered — every insert found a nearby gap and "succeeded" —
+but each small shift nudges nearby keys slightly further from where
+the model originally predicted them, and that drift compounds. In a
+few unlucky, heavily-inserted-into neighborhoods it exceeded the
+±64 search window, even though the keys were still physically
+present. Fixed by forcing a periodic rebalance tied to `eps` itself
+(not to array size) — since in the worst case, every insert since the
+last rebalance could have landed near the same key.
+
+**Results (1M keys, 90% initial / 10% held out and inserted):**
+
+| approach | ns/insert |
+|---|---|
+| naive vector (shift on every insert) | 302,445 |
+| gapped array (with periodic rebalance) | 105,749 |
+
+~2.9x faster than the naive baseline, and — the number that actually
+matters — **100% correct**: every one of the 1,000,000 keys is
+findable after all inserts, verified directly rather than assumed.
+The rebalance count (1,566 full rebuilds) shows the honest cost of
+the current fix: the threshold is global, so any 64 inserts anywhere
+in the array force a full rebuild of the *entire* structure, not just
+the drifting region.
+
+**Known limitation, since fixed:** the first working version rebalanced
+the *entire* array whenever drift exceeded eps anywhere, which was
+correct but expensive (1,566 full rebalances). Rebalancing is now
+tracked **per segment** — each segment refreshes only its own small
+physical region once its own insert count crosses the threshold, with
+a much less frequent whole-array rebalance kept as a safety net for
+drift that spills across a segment boundary.
+
+**Results after the fix, same 1M-key / 100k-insert test:**
+
+| version | ns/insert | rebalances |
+|---|---|---|
+| naive vector (shift on every insert) | 304,954 | — |
+| gapped array, global rebalance only | 105,749 | 1,566 full |
+| gapped array, per-segment rebalance | **19,638** | 1,186 local + 196 full |
+
+~15.5x faster than the naive baseline, and ~5.4x faster than the
+global-only version — from a change that didn't touch correctness at
+all, only *how much* gets rebuilt when drift is detected. Verified
+correct for all 1,000,000 keys both before and after the change.
+
+## Next: Phase 4
+
+Full benchmark suite — sweep dataset sizes/distributions, measure
+memory footprint, and compare against the real published PGM-index.

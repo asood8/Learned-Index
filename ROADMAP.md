@@ -5,10 +5,10 @@ An embedded SQL database whose storage engine is a learned index
 architected the same way SQLite is: a SQL front end sitting on top
 of a swappable storage engine.
 
-**Status:** Phases 0–2 complete (see `README.md`, `python/`, `cpp/`,
-`results/phase0_baseline.csv`). Phase 2's segmented model hit 25.7ns/
-lookup on skewed data using just 3 segments — ~8x faster than binary
-search, and ~9x faster than Phase 1's single line on the same data.
+**Status:** Phases 0–3 complete (see `README.md`, `python/`, `cpp/`,
+`results/`). Phase 3's per-segment rebalancing refinement is done:
+19,638ns/insert, ~15.5x faster than naive full-shift inserts, verified
+correct for all 1M keys after 100k inserts.
 
 ---
 
@@ -39,11 +39,19 @@ lookups from 228.5ns (Phase 1, losing to binary search) down to
 broke a single line. Uniform data needed 84 segments and performed
 about the same as Phase 1, as expected. *(~110 lines, done)*
 
-### Phase 3 — Updates (inserts)
-Real data changes. Use a gapped array — leave small unused slots
-scattered through the sorted array so inserts don't require shifting
-everything after them (the trick behind ALEX, the updatable
-follow-up to the original learned-index paper). *(~150–250 lines)*
+### Phase 3 — Updates (inserts) ✅ done, including the per-segment refinement
+Gapped array (density 0.7) reusing Phase 2's exact segmentation
+algorithm, refit against gapped positions instead of dense rank. A
+real drift bug was found via the final correctness check (11 of 1M
+keys unfindable after inserts, despite zero rebalances — compounding
+shift drift from many nearby inserts) and fixed by forcing periodic
+rebalances tied to `eps`. That first fix was correct but expensive
+(1,566 full-array rebalances); rebalancing was then made per-segment,
+so each segment refreshes only its own small physical region, with a
+much rarer full-array rebalance kept as a safety net. Final result:
+19,638ns/insert (~15.5x faster than naive full-shift inserts, ~5.4x
+faster than the global-only fix), verified correct for all 1M keys
+throughout. *(~230 lines, done)*
 
 ### Phase 4 — Correctness test suite
 Before trusting any speed number: empty array, duplicate keys,

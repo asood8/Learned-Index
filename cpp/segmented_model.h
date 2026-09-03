@@ -32,10 +32,15 @@ struct SegmentedModel {
   int64_t eps = 0;  // the error bound every segment was built to guarantee
 };
 
-// Builds segments left to right in one O(n) pass. Each segment starts
-// at an anchor point and extends as far as possible while some line
-// through the anchor still keeps every point within +/-eps.
-SegmentedModel build_segmented_model(const std::vector<int64_t>& keys, int64_t eps) {
+// Builds segments left to right in one O(n) pass, fitting against
+// caller-supplied position labels rather than assuming position ==
+// array index. Phase 2 used this with positions = {0,1,2,...,n-1}
+// (dense array indices); Phase 3's gapped array reuses this exact
+// same fitting logic, just handing it gapped-array slot numbers
+// instead -- the segmentation algorithm itself doesn't care what the
+// positions mean, only that they're numbers to predict.
+SegmentedModel build_segmented_model(const std::vector<int64_t>& keys,
+                                      const std::vector<int64_t>& positions, int64_t eps) {
   SegmentedModel model;
   model.eps = eps;
   const size_t n = keys.size();
@@ -44,7 +49,7 @@ SegmentedModel build_segmented_model(const std::vector<int64_t>& keys, int64_t e
   size_t i = 0;
   while (i < n) {
     const int64_t anchor_x = keys[i];
-    const int64_t anchor_y = static_cast<int64_t>(i);
+    const int64_t anchor_y = positions[i];
 
     double slope_min = -std::numeric_limits<double>::infinity();
     double slope_max = std::numeric_limits<double>::infinity();
@@ -52,7 +57,7 @@ SegmentedModel build_segmented_model(const std::vector<int64_t>& keys, int64_t e
 
     for (size_t k = i + 1; k < n; k++) {
       const double dx = static_cast<double>(keys[k] - anchor_x);
-      const double dy = static_cast<double>(static_cast<int64_t>(k) - anchor_y);
+      const double dy = static_cast<double>(positions[k] - anchor_y);
 
       // With the anchor fixed exactly, point k is within eps iff the
       // slope falls in this interval -- derived directly from
@@ -79,6 +84,14 @@ SegmentedModel build_segmented_model(const std::vector<int64_t>& keys, int64_t e
   }
 
   return model;
+}
+
+// Convenience overload for the dense-array case (Phase 2): positions
+// are just the array indices themselves.
+SegmentedModel build_segmented_model(const std::vector<int64_t>& keys, int64_t eps) {
+  std::vector<int64_t> positions(keys.size());
+  for (size_t i = 0; i < keys.size(); i++) positions[i] = static_cast<int64_t>(i);
+  return build_segmented_model(keys, positions, eps);
 }
 
 // Finds the index of the last segment whose start_key <= key -- the

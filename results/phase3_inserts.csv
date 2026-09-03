@@ -1,0 +1,3 @@
+path,n,structure,ns_per_insert
+data/uniform_1000000.bin,1000000,gapped_array,19638.3
+data/uniform_1000000.bin,1000000,naive_vector,304954
