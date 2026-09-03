@@ -107,6 +107,7 @@ size_t find_segment_index(const std::vector<Segment>& segments, int64_t key) {
 
 bool segmented_search(const std::vector<int64_t>& keys, const SegmentedModel& model,
                        int64_t key, int64_t& out_value) {
+  if (model.segments.empty()) return false;
   const size_t seg_idx = find_segment_index(model.segments, key);
   const Segment& seg = model.segments[seg_idx];
 

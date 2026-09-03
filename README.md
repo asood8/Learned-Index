@@ -154,7 +154,35 @@ global-only version — from a change that didn't touch correctness at
 all, only *how much* gets rebuilt when drift is detected. Verified
 correct for all 1,000,000 keys both before and after the change.
 
-## Next: Phase 4
+## Phase 4 — correctness test suite
 
-Full benchmark suite — sweep dataset sizes/distributions, measure
-memory footprint, and compare against the real published PGM-index.
+`cpp/test_suite.cpp` goes beyond the sample-based "check the first
+2,000 keys" pattern used in earlier phases and specifically targets
+edge cases: empty structures, single elements, duplicate inserts, and
+fresh-seed stress runs. Every previous phase found a real bug this
+way, and this one was no exception — two more turned up:
+
+1. **A real crash** (found via AddressSanitizer): when we generalized
+   `build_segmented_model` for Phase 3, `segmented_search` never got
+   the same "is this model empty" guard that `GappedArray::search`
+   already had. Searching or inserting into a genuinely empty
+   structure walked off the end of an empty vector. Fixed by adding
+   the missing guard, plus a matching bootstrap path in
+   `GappedArray::insert` for inserting into an empty array.
+2. **Inconsistent duplicate-key behavior**: the B+-tree already
+   treats inserting an existing key as an overwrite (no duplicate
+   entry). The gapped array didn't — it silently created a second
+   physical copy of the same key. Fixed by checking for an existing
+   key first and treating a duplicate insert as a no-op, matching the
+   B+-tree's behavior.
+
+**Final result: 19/19 tests passing**, covering the B+-tree, Phase 1's
+linear model, Phase 2's segmented model, and Phase 3's gapped array.
+All of Phase 0–3's benchmark numbers were re-verified afterward to
+confirm neither fix changed performance.
+
+## Next: Phase 5
+
+Durability — a write-ahead log, so data survives a restart. The
+actual dependency everything after it (including a SQL layer) sits
+on top of.

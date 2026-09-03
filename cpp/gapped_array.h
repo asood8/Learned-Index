@@ -62,6 +62,17 @@ class GappedArray {
   // the same "batch retrain" idea mentioned as the easy option, used
   // here only as a last resort instead of the default behavior.
   void insert(int64_t key) {
+    if (model_.segments.empty()) {
+      // nothing to route against yet -- bootstrap the structure from
+      // scratch with just this one key, same fallback path used when
+      // a local area is completely out of room
+      rebalance_with(key);
+      return;
+    }
+
+    size_t existing_idx;
+    if (search(key, existing_idx)) return;  // key already present: no-op, not a second copy
+
     const size_t owning_segment = find_segment_index(model_.segments, key);
     const int64_t predicted = predict_from(owning_segment, key);
     const int64_t n = static_cast<int64_t>(data_.size());

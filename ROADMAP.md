@@ -5,10 +5,11 @@ An embedded SQL database whose storage engine is a learned index
 architected the same way SQLite is: a SQL front end sitting on top
 of a swappable storage engine.
 
-**Status:** Phases 0–3 complete (see `README.md`, `python/`, `cpp/`,
-`results/`). Phase 3's per-segment rebalancing refinement is done:
-19,638ns/insert, ~15.5x faster than naive full-shift inserts, verified
-correct for all 1M keys after 100k inserts.
+**Status:** Phases 0–4 complete (see `README.md`, `python/`, `cpp/`,
+`results/`). Phase 4's test suite found and fixed two real bugs (a
+crash on empty structures, and inconsistent duplicate-key handling) —
+19/19 tests passing, with every earlier phase's benchmark re-verified
+afterward to confirm neither fix regressed performance.
 
 ---
 
@@ -53,10 +54,16 @@ much rarer full-array rebalance kept as a safety net. Final result:
 faster than the global-only fix), verified correct for all 1M keys
 throughout. *(~230 lines, done)*
 
-### Phase 4 — Correctness test suite
-Before trusting any speed number: empty array, duplicate keys,
-boundary keys (first/last), and correctness after a batch of random
-inserts. Proves it's right, not just fast. *(~100–200 lines)*
+### Phase 4 — Correctness test suite ✅ done
+Dedicated edge-case testing beyond earlier phases' sample checks:
+empty structures, single elements, duplicate inserts, fresh-seed
+stress runs. Found and fixed two real bugs: a crash on empty
+structures (`segmented_search` was missing the empty-model guard
+`GappedArray::search` already had, found via AddressSanitizer), and
+inconsistent duplicate-key handling (the gapped array created a
+second copy instead of a no-op, unlike the B+-tree). Result: 19/19
+tests passing; all earlier phases' benchmarks re-verified afterward
+to confirm neither fix changed performance. *(~140 lines, done)*
 
 ### Phase 5 — Durability (write-ahead log)
 The one non-negotiable addition for calling this a database rather

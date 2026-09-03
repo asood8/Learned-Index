@@ -1,9 +1,9 @@
 path,n,num_queries,structure,ns_per_lookup
-data/uniform_1000000.bin,1000000,200000,binary_search,218.15
-data/uniform_1000000.bin,1000000,200000,bplus_tree,323.036
-data/uniform_1000000.bin,1000000,200000,learned_index,154.651
-data/uniform_1000000.bin,1000000,200000,segmented_index,155.376
-data/skewed_1000000.bin,1000000,200000,binary_search,212.779
-data/skewed_1000000.bin,1000000,200000,bplus_tree,299.093
-data/skewed_1000000.bin,1000000,200000,learned_index,228.456
-data/skewed_1000000.bin,1000000,200000,segmented_index,25.7224
+data/uniform_1000000.bin,1000000,200000,binary_search,205.329
+data/uniform_1000000.bin,1000000,200000,bplus_tree,321.196
+data/uniform_1000000.bin,1000000,200000,learned_index,140.763
+data/uniform_1000000.bin,1000000,200000,segmented_index,148.841
+data/skewed_1000000.bin,1000000,200000,binary_search,211.054
+data/skewed_1000000.bin,1000000,200000,bplus_tree,341.807
+data/skewed_1000000.bin,1000000,200000,learned_index,245.697
+data/skewed_1000000.bin,1000000,200000,segmented_index,30.1358
