@@ -76,8 +76,14 @@ class GappedArray {
     const size_t owning_segment = find_segment_index(model_.segments, key);
     const int64_t predicted = predict_from(owning_segment, key);
     const int64_t n = static_cast<int64_t>(data_.size());
-    const int64_t lo = std::max<int64_t>(0, predicted - eps_);
-    const int64_t hi = std::min<int64_t>(n - 1, predicted + eps_);
+    // Clamp into [0, n-1] rather than just capping one side: a
+    // prediction extrapolated far outside a segment's trained range
+    // (as happens for a key approaching from the opposite direction
+    // a segment was built for) can be wildly negative or huge, and an
+    // un-clamped hi could end up negative, leaving insertion_point
+    // negative below.
+    const int64_t lo = std::clamp<int64_t>(predicted - eps_, 0, n - 1);
+    const int64_t hi = std::clamp<int64_t>(predicted + eps_, 0, n - 1);
 
     int64_t insertion_point = hi + 1;
     for (int64_t idx = lo; idx <= hi; idx++) {
@@ -154,9 +160,9 @@ class GappedArray {
     const int64_t n = static_cast<int64_t>(data_.size());
     for (int64_t d = 0; d <= max_gap_scan_; d++) {
       const int64_t right = start + d;
-      if (right < n && data_[right] == EMPTY_SLOT) return right;
+      if (right >= 0 && right < n && data_[right] == EMPTY_SLOT) return right;
       const int64_t left = start - 1 - d;
-      if (left >= 0 && data_[left] == EMPTY_SLOT) return left;
+      if (left >= 0 && left < n && data_[left] == EMPTY_SLOT) return left;
     }
     return -1;  // essentially full nearby; caller should rebalance
   }

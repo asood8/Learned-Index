@@ -181,8 +181,120 @@ linear model, Phase 2's segmented model, and Phase 3's gapped array.
 All of Phase 0–3's benchmark numbers were re-verified afterward to
 confirm neither fix changed performance.
 
-## Next: Phase 5
+## Phase 5 — durability (write-ahead log)
 
-Durability — a write-ahead log, so data survives a restart. The
-actual dependency everything after it (including a SQL layer) sits
-on top of.
+`cpp/write_ahead_log.h` appends every insert to a plain file and
+forces it to disk with `fsync` *before* the in-memory structure is
+touched. `cpp/durable_store.h` wraps the Phase 3 gapped array with
+this log, replaying it on construction so state survives a restart.
+
+**Proven with an actual simulated restart**, not just asserted:
+`cpp/durability_demo.cpp` builds a `DurableStore`, inserts 5,000 keys,
+then lets it go out of scope entirely (closing the file, discarding
+all in-memory state) before constructing a **brand new** `DurableStore`
+from the same file on disk — the same sequence of events as a real
+process crash and restart. Result: **all 5,000 keys recovered and
+verified**, exactly as if nothing had happened.
+
+**Another real bug, found by this new access pattern specifically:**
+the demo's overhead comparison inserts keys in *decreasing* order —
+nothing before this had exercised that direction. A key routed to a
+segment whose line doesn't represent it well (extrapolating the wrong
+way) could produce a wildly negative predicted position, leaving
+`hi` negative and an unvalidated negative index flowing straight into
+`find_nearest_gap`, which checked `right < n` but never `right >= 0`.
+AddressSanitizer caught the resulting out-of-bounds read immediately.
+Fixed at the root — `lo`/`hi` are now clamped into `[0, n-1]` with
+`std::clamp` so a bad prediction can never produce an invalid index —
+plus the missing `right >= 0` check added defensively. All 19 Phase 4
+tests and the durability demo both still pass after the fix.
+
+**The honest cost of durability, measured, not assumed:**
+
+| operation | ns/op |
+|---|---|
+| plain insert (no WAL) | 3,251 |
+| durable `put()` (log + fsync + insert) | 118,125 |
+
+Roughly a **36x** overhead — durability isn't free, and `fsync` is
+almost the entirety of that cost (measured independently at ~113μs
+per call earlier). This is exactly why real databases batch multiple
+writes into one fsync ("group commit") instead of syncing after every
+single one — not implemented here, but worth knowing why it exists.
+
+## Phase 6a — learned Bloom filter (a genuine negative result)
+
+`cpp/learned_bloom_filter.h` replaces a Bloom filter's bit array with
+logistic regression over hashed features (the "hashing trick"),
+trained with real gradient descent — the first model in this project
+with no closed-form solution, since the sigmoid makes the loss
+nonlinear. Every real member the trained model still scores below
+threshold goes into a small backup set, preserving the same
+zero-false-negative guarantee a classic Bloom filter gives.
+
+**Compared honestly against `cpp/classic_bloom_filter.h`** (built with
+the textbook optimal-bits formula), on the same 100,000-key member
+set, with empirical false-positive rate measured identically for both
+against confirmed true negatives:
+
+| filter | memory | empirical FPR |
+|---|---|---|
+| classic (built for 1.0% FPR) | 119,814 bytes | 1.021% |
+| learned (matched byte budget) | 462,288 bytes | 50.380% |
+| learned (matched *slot count*, 64x more memory) | 7,668,048 bytes | 50.225% |
+
+**The classic filter won decisively, and giving the learned filter
+64x more memory didn't meaningfully help** — ruling out "too few
+buckets causing collisions" as the explanation. The real reason: our
+synthetic keys are arbitrary sorted integers with no learnable
+structure separating members from non-members. The paper's own
+motivating use case (classifying malicious URLs) works because
+malicious URLs share real lexical patterns a classifier can
+generalize from. Whether one specific integer happens to be among
+100,000 essentially-arbitrary values has no such pattern — it's exact
+memorization or nothing, and a classic Bloom filter's hash-and-flip-a-bit
+*is* memorization, about as space-efficient as information theory
+allows. This is worth contrasting directly with why the learned
+*index* (Phases 1–3) worked so well: sorted order gives a real, smooth,
+learnable relationship between a key and its position (the CDF).
+Set membership in an arbitrary collection has no equivalent structure
+to learn — the technique isn't broken, it's just being asked a
+question this specific data has no learnable answer to.
+
+## Phase 6b — Hawkeye-style learned cache (a genuine positive result)
+
+`cpp/hawkeye_cache.h` trains a second logistic regression — this time
+over **recency and frequency**, the two classic predictors of reuse —
+to approximate Belady's optimal eviction decisions using only
+information available online. Belady's algorithm itself (`cpp/belady.h`)
+needs the future to decide what to evict, so it's only usable directly
+in two ways: generating training labels on a trace where the "future"
+is just data already in hand, and computing an unreachable ceiling
+hit rate for comparison.
+
+**Trained on one Zipfian trace, evaluated on a completely separate
+one** (different seed) against `cpp/lru_cache.h`, on a workload where
+10,000 keys compete for a 500-slot cache (5%) under realistic skew:
+
+| policy | hit rate |
+|---|---|
+| LRU | 58.67% |
+| learned (Hawkeye-style) | **63.36%** |
+| Belady's optimal (ceiling, needs the future) | 74.63% |
+
+The learned cache closed **29.4% of the gap** between LRU and the
+unreachable theoretical ceiling — a real, meaningful improvement, not
+a rounding-error win, and in the same realistic range real Hawkeye/LRB
+papers report (nothing online reaches OPT; the point is closing part
+of that gap). This is the direct contrast with Phase 6a: **recency and
+frequency genuinely predict reuse** in a skewed access pattern — real,
+learnable structure — which is exactly what arbitrary key membership
+lacked. Same tool (logistic regression, real gradient descent, no
+closed-form solution), applied to two different problems, with two
+honestly different outcomes.
+
+## Next: Phase 7
+
+The full benchmark suite — sweeping dataset sizes and distributions,
+measuring memory footprint, and comparing against the real published
+PGM-index.

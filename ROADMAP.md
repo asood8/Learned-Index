@@ -5,11 +5,12 @@ An embedded SQL database whose storage engine is a learned index
 architected the same way SQLite is: a SQL front end sitting on top
 of a swappable storage engine.
 
-**Status:** Phases 0–4 complete (see `README.md`, `python/`, `cpp/`,
-`results/`). Phase 4's test suite found and fixed two real bugs (a
-crash on empty structures, and inconsistent duplicate-key handling) —
-19/19 tests passing, with every earlier phase's benchmark re-verified
-afterward to confirm neither fix regressed performance.
+**Status:** Phases 0–6 complete (see `README.md`, `python/`, `cpp/`,
+`results/`). Phase 6 now has both sides of a genuinely honest story:
+6a's learned Bloom filter lost decisively (no learnable structure in
+arbitrary key membership), 6b's learned cache won meaningfully
+(closed 29.4% of the LRU-to-Belady-optimal gap, since recency and
+frequency genuinely predict reuse). Phase 7 (full benchmark suite) is next.
 
 ---
 
@@ -65,23 +66,45 @@ second copy instead of a no-op, unlike the B+-tree). Result: 19/19
 tests passing; all earlier phases' benchmarks re-verified afterward
 to confirm neither fix changed performance. *(~140 lines, done)*
 
-### Phase 5 — Durability (write-ahead log)
-The one non-negotiable addition for calling this a database rather
-than a data structure. Every `put` gets appended to a log file
-*before* touching the in-memory structure; on startup, replay the log
-to rebuild state. This is the literal "D" in ACID. *(~80–120 lines)*
+### Phase 5 — Durability (write-ahead log) ✅ done
+Every insert logged and `fsync`'d to disk before touching the
+in-memory structure; replayed on startup. Proven with an actual
+simulated restart (destroy the object, rebuild from the same file on
+disk) — all 5,000 test keys recovered and verified. Found and fixed a
+real out-of-bounds bug along the way: a decreasing-key insert pattern
+(never exercised before) could extrapolate a wildly negative
+predicted position, leaving an unvalidated negative index reaching
+`find_nearest_gap`. Fixed by clamping the prediction window into
+valid bounds at the source. Measured cost of real durability: ~36x
+per-operation overhead vs. no WAL, almost entirely `fsync` (~113μs/call
+measured independently) — the reason real systems batch commits
+instead of syncing every write. *(~120 lines, done)*
 
 ### Phase 6 — Cooperating learned layers *(optional, parallel — can be built before or after Part 2)*
-Give the classifier idea from earlier in this project an actual job:
-- A **learned Bloom filter** in front of `get` — a small classifier
-  answers "definitely not here" and skips everything else.
-- A **Hawkeye/LRB-style cache classifier** — decides which recently
-  accessed keys are worth keeping hot, instead of plain LRU, and
-  learns from each access the learned index serves.
+**6a: learned Bloom filter ✅ done — a genuine negative result.**
+Logistic regression over hashed features, trained via real gradient
+descent (no closed-form solution here, unlike every earlier model),
+with a backup set preserving the zero-false-negative guarantee.
+Compared honestly against a classic Bloom filter built with the
+optimal-bits formula: classic won decisively (1.0% vs 50.4% FPR), and
+giving the learned filter 64x more memory (matched slot count instead
+of matched bytes) didn't meaningfully help — ruling out "too few
+buckets" as the explanation. Root cause: arbitrary numeric key
+membership has no learnable structure the way sorted position does;
+the paper's real use case (malicious URLs) has genuine lexical
+patterns to generalize from, and this synthetic data doesn't have an
+equivalent. *(~150 lines, done)*
 
-Both sit *inside* `get`/`put` without changing what those functions
-look like from the outside — the SQL layer in Part 2 won't know or
-care whether this phase happened first or last. *(~200–300 lines)*
+**6b: Hawkeye/LRB-style cache classifier ✅ done — a genuine positive
+result.** Logistic regression over recency and frequency (log1p-scaled),
+trained via gradient descent on Belady-labeled data from a training
+trace, evaluated on a completely separate trace. Result: 63.36% hit
+rate vs. LRU's 58.67%, closing 29.4% of the gap to Belady's optimal
+ceiling (74.63%, unreachable online since it needs the future) — a
+real, meaningful win, in the realistic range actual Hawkeye/LRB papers
+report. Direct contrast with 6a: recency/frequency genuinely predict
+reuse in a skewed workload, unlike arbitrary key membership.
+*(~180 lines, done)*
 
 ### Phase 7 — Full benchmark suite
 The "prove it" phase:
