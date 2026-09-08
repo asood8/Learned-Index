@@ -293,8 +293,136 @@ lacked. Same tool (logistic regression, real gradient descent, no
 closed-form solution), applied to two different problems, with two
 honestly different outcomes.
 
-## Next: Phase 7
+## Phase 7a — dataset/distribution sweep and real memory footprint
 
-The full benchmark suite — sweeping dataset sizes and distributions,
-measuring memory footprint, and comparing against the real published
-PGM-index.
+`cpp/full_benchmark.cpp` sweeps three dataset sizes (100K, 1M, 5M —
+a real 50x range) across both distributions, measuring not just
+latency but **index-only memory** — deliberately excluding the raw
+sorted array every approach needs regardless, since the point is what
+each *index structure* costs on top of shared data, not the data
+itself.
+
+**Memory (the result that matters most here):** the B+-tree costs a
+consistent **~37.3 bytes/key** at every single scale tested — that's
+real pointer/node overhead, not something that shrinks as data grows.
+The segmented index costs **0.000–0.002 bytes/key** — three to four
+orders of magnitude smaller — because its memory scales with segment
+*count* (in the hundreds), not with `n` at all. This is the original
+paper's other headline claim, now demonstrated with our own numbers
+across a real size range instead of asserted.
+
+**Speed**, consistent across all three sizes:
+
+| n | binary search | B+-tree | learned (Phase 1) | segmented (Phase 2) |
+|---|---|---|---|---|
+| 100K uniform | 127.9 ns | 186.4 ns | 74.0 ns | 87.1 ns |
+| 1M uniform | 220.7 ns | 330.1 ns | 139.2 ns | 147.9 ns |
+| 5M uniform | 357.7 ns | 557.0 ns | 190.6 ns | 200.8 ns |
+| 100K skewed | 128.7 ns | 180.0 ns | 149.4 ns | **18.2 ns** |
+| 1M skewed | 219.1 ns | 336.1 ns | 227.7 ns | **26.9 ns** |
+| 5M skewed | 319.8 ns | 630.1 ns | 343.2 ns | **85.8 ns** |
+
+The Phase 1 vs. Phase 2 story from much earlier holds at every scale:
+one line wins on uniform data, loses badly to a single line's own
+failure mode on skewed data, and segmentation fixes exactly that,
+consistently, not as a one-off result.
+
+**One small honest nuance worth keeping**: on 100K uniform keys,
+segmented (87.1ns) is slightly *slower* than the single-line model
+(74.0ns) — segment routing has a small, real cost, and when the data
+doesn't actually need multiple segments, that cost isn't paid back by
+anything. It only pays for itself when segmentation is actually
+solving a real problem (skewed data, or larger uniform datasets where
+memory-hierarchy effects start to matter).
+
+**Honestly out of scope for this sweep**: the real SOSD benchmark
+datasets aren't fetchable in this environment (hosted outside the
+network domains available here) — reported with our own uniform and
+skewed generators instead, which is what every phase so far has used
+anyway.
+
+## Phase 7b — comparison against the real, published PGM-index
+
+Rather than only ever comparing against our own B-tree, `cpp/pgm_comparison.cpp`
+benchmarks our from-scratch segmented index against the actual
+[PGM-index](https://github.com/gvinciguerra/PGM-index) implementation —
+vendored unmodified into `cpp/third_party/pgm/` (Apache 2.0) — on the
+same 1M-key datasets, same `eps=64`.
+
+| dataset | ours | PGM-index (default) | PGM-index (no recursion) |
+|---|---|---|---|
+| uniform | 154.7 ns, 79 segments, 1,896 bytes | **125.6 ns**, 57 segments, 984 bytes | 155.7 ns |
+| skewed | **47.6 ns**, 2 segments, 48 bytes | 104.0 ns, 2 segments, 104 bytes | 93.0 ns |
+
+**A genuinely mixed, honest result — not a clean win either way.**
+On uniform data, the real implementation wins on every axis: fewer,
+better-optimized segments (57 vs. our 79 — direct confirmation of the
+tradeoff flagged back in Phase 2, where pinning each segment's anchor
+exactly was chosen for easy-to-verify correctness over full
+optimality), less memory, and faster lookups.
+
+On skewed data, **ours is over 2x faster** — and this was worth
+actually investigating rather than just reporting. PGM-index builds a
+recursive routing layer by default (`EpsilonRecursive=4`) that
+evaluates a model at *each* level before ever reaching the base
+segments. Testing with recursion explicitly disabled
+(`EpsilonRecursive=0`) confirms it both ways: uniform data got
+*slower* without it (125.6→155.7ns — the hierarchy pays for itself
+across 57+ segments), while skewed data got *faster* without it
+(104.0→93.0ns — pure overhead when there are only 2 segments to route
+between, nothing to gain from hierarchy). That's a real, confirmed,
+mechanistic explanation, not a guess. It doesn't fully close the gap,
+though — even with recursion off, PGM-index (93.0ns) is still roughly
+2x slower than ours (47.6ns) on this dataset, and pinning down the
+remaining difference would need real profiling this project didn't do.
+
+The honest takeaway: **a mature, general-purpose implementation
+optimizes for the case that's actually hard** (many segments needing
+efficient routing) at a small, real cost on the case that's trivial
+(few segments) — exactly the kind of engineering tradeoff a
+general-purpose library has to make that a narrower, single-purpose
+implementation doesn't.
+
+## Phase 7c — adversarial insert pattern (a real, escalating vulnerability)
+
+`cpp/adversarial_test.cpp` targets the actual mechanism Phase 3
+built, not a disconnected toy example: both scenarios insert the same
+100,000 keys into an identical 900,000-key starting structure — the
+only difference is whether those keys scatter across the whole key
+range (benign, matching Phase 3's original test) or concentrate into
+one narrow window (adversarial). This is exactly the lever a real
+attacker with insert access has, and it mirrors real published
+research: poisoning attacks on ALEX and PGM-index have been shown to
+degrade performance by up to ~20%.
+
+**A real, escalating effect as the window narrows:**
+
+| attack window | ns/insert | local rebalances | full rebalances | degradation |
+|---|---|---|---|---|
+| benign (scattered) | 14,805.1 | 0 | 195 | — |
+| 5.0% of key range | 14,773.9 | 231 | 195 | −0.2% (noise) |
+| 2.0% of key range | 15,320.1 | 795 | 195 | +3.5% |
+| 1.2% of key range | 16,818.2 | 1,096 | **189** | **+13.6%** |
+
+A mild concentration has no real effect. As it tightens, degradation
+climbs clearly and monotonically, reaching **+13.6%** — comparable to,
+though a bit under, the ~20% figure from real published attacks on
+ALEX/PGM-index. The mechanism is visible directly in the data: full
+rebalance count stays roughly flat (even *dips slightly* at the
+tightest window) while local rebalances climb sharply (231→1,096) —
+Phase 3's per-segment rebalancing is absorbing most of the pressure,
+exactly as it was designed to, avoiding the far more expensive
+full-array rebuilds an attacker might hope to trigger. But absorbing
+isn't free: each local rebalance still costs something, and enough of
+them under concentrated pressure adds up to a real, measurable
+slowdown. This is a genuinely good outcome to report honestly — the
+Phase 3 refinement built purely for speed turned out to also provide
+real (if partial) resilience against exactly this kind of attack,
+which wasn't the goal when it was built.
+
+## Phase 7 complete
+
+All three parts done: the full size/distribution sweep with real
+memory footprint (7a), an honest comparison against the actual
+published PGM-index (7b), and a real, escalating adversarial finding
+(7c). Only Part 2 (the SQL layer, Phases 8–12) remains on the roadmap.

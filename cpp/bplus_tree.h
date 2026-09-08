@@ -44,6 +44,14 @@ class BPlusTree {
 
   size_t size() const { return count_; }
 
+  // Walks the whole tree, summing each node's actual vector
+  // capacities plus struct overhead. This counts real allocated
+  // memory (not just live element count), but doesn't account for
+  // the memory allocator's own internal bookkeeping per allocation --
+  // a reasonable, clearly-labeled approximation, not a claim of exact
+  // byte-for-byte process memory usage.
+  size_t memory_bytes() const { return node_memory_bytes(root_); }
+
  private:
   struct Node {
     bool is_leaf;
@@ -53,6 +61,18 @@ class BPlusTree {
     Node* next = nullptr;         // leaf only: link to next leaf
     explicit Node(bool leaf) : is_leaf(leaf) {}
   };
+
+  size_t node_memory_bytes(const Node* node) const {
+    size_t bytes = sizeof(Node);
+    bytes += node->keys.capacity() * sizeof(int64_t);
+    if (node->is_leaf) {
+      bytes += node->values.capacity() * sizeof(int64_t);
+    } else {
+      bytes += node->children.capacity() * sizeof(Node*);
+      for (const Node* child : node->children) bytes += node_memory_bytes(child);
+    }
+    return bytes;
+  }
 
   Node* root_;
   size_t count_ = 0;

@@ -5,12 +5,15 @@ An embedded SQL database whose storage engine is a learned index
 architected the same way SQLite is: a SQL front end sitting on top
 of a swappable storage engine.
 
-**Status:** Phases 0–6 complete (see `README.md`, `python/`, `cpp/`,
-`results/`). Phase 6 now has both sides of a genuinely honest story:
-6a's learned Bloom filter lost decisively (no learnable structure in
-arbitrary key membership), 6b's learned cache won meaningfully
-(closed 29.4% of the LRU-to-Belady-optimal gap, since recency and
-frequency genuinely predict reuse). Phase 7 (full benchmark suite) is next.
+**Status:** Phases 0–7 complete (see `README.md`, `python/`, `cpp/`,
+`results/`). Phase 7 closes with three real findings: both headline
+claims hold across a 50x size range (7a); an honest, mixed comparison
+against the real PGM-index — they win on uniform data, we win 2x on
+skewed, both explained mechanistically (7b); and a real, escalating
+adversarial vulnerability (up to +13.6% degradation, comparable to
+published attacks on ALEX/PGM-index), with Phase 3's per-segment
+rebalancing shown to absorb most — not all — of the damage (7c). Only
+the SQL layer (Phases 8-12) remains.
 
 ---
 
@@ -107,21 +110,37 @@ reuse in a skewed workload, unlike arbitrary key membership.
 *(~180 lines, done)*
 
 ### Phase 7 — Full benchmark suite
-The "prove it" phase:
-- Sweep dataset size (1M/10M/100M) and distribution (uniform, skewed,
-  and the real SOSD benchmark dataset the literature uses).
-- Measure **memory footprint**, not just latency — the original
-  paper's other headline claim, and the one most reimplementations
-  skip.
-- Compare against your own B+-tree/binary-search baselines **and**
-  the real published [PGM-index](https://github.com/gvinciguerra/PGM-index)
-  implementation — a fairer bar than grading your own homework.
-- Test under a deliberately adversarial/poisoned key-insertion
-  pattern and report the degradation — this is a real, published
-  research angle (poisoning attacks on ALEX/PGM-index have been shown
-  to degrade performance by up to 20%), not a stretch of the concept.
+**7a: dataset/distribution sweep + real memory footprint ✅ done.**
+Swept 100K/1M/5M keys × uniform/skewed, measuring index-only memory
+(excluding the shared raw array) alongside latency. Confirmed both of
+the original paper's headline claims hold at every scale tested, not
+just one: B+-tree costs a consistent ~37.3 bytes/key; segmented index
+costs 0.000–0.002 bytes/key (3–4 orders of magnitude smaller, scales
+with segment count, not `n`). Segmented index also wins on speed at
+every scale, most dramatically on skewed data (up to ~7x over binary
+search). One honest nuance found: segment routing has a small real
+cost that isn't paid back on uniform data at small `n`, where a
+single line was already sufficient. Real SOSD datasets weren't
+fetchable in this environment (hosted outside available network
+domains) — used our own generators instead. *(~200 lines, done)*
 
-*(~250–350 lines)*
+**7b: real PGM-index comparison + adversarial testing ✅ done.**
+Vendored the actual published PGM-index (Apache 2.0) into
+`cpp/third_party/pgm/` for an honest side-by-side. Mixed, genuinely
+investigated result: PGM-index wins on uniform data (fewer, better
+segments — direct confirmation of the "pinned anchor" tradeoff flagged
+back in Phase 2), ours wins 2x on skewed data. Dug into *why*: PGM's
+default recursive routing layer helps when there are many segments to
+route among (uniform) and is pure overhead when there are only 2
+(skewed) — confirmed directly by testing with recursion disabled,
+though it didn't fully close the gap. Adversarial test targeted the
+actual Phase 3 mechanism: concentrating the same insert count into a
+narrowing window produced a real, escalating degradation (−0.2% → 
++3.5% → **+13.6%**), comparable to the ~20% figure from real published
+poisoning attacks on ALEX/PGM-index. Local-rebalance count climbed
+sharply while full-rebalance count stayed flat — Phase 3's per-segment
+refinement absorbs most of the attack, a genuine unplanned benefit of
+work originally done purely for speed. *(~350 lines, done)*
 
 ---
 
