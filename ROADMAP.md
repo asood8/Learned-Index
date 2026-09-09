@@ -5,15 +5,11 @@ An embedded SQL database whose storage engine is a learned index
 architected the same way SQLite is: a SQL front end sitting on top
 of a swappable storage engine.
 
-**Status:** Phases 0–7 complete (see `README.md`, `python/`, `cpp/`,
-`results/`). Phase 7 closes with three real findings: both headline
-claims hold across a 50x size range (7a); an honest, mixed comparison
-against the real PGM-index — they win on uniform data, we win 2x on
-skewed, both explained mechanistically (7b); and a real, escalating
-adversarial vulnerability (up to +13.6% degradation, comparable to
-published attacks on ALEX/PGM-index), with Phase 3's per-segment
-rebalancing shown to absorb most — not all — of the damage (7c). Only
-the SQL layer (Phases 8-12) remains.
+**Status:** Storage engine (Phases 0-7) complete; Phase 8 (rows, keys,
+catalog) done (see `README.md`, `python/`, `cpp/`, `results/`). Had to
+extend the WAL/DurableStore to support real values first (it only
+tracked key existence before). Two tables, 150 rows total, survive a
+real simulated restart with correct decoding, catalog included.
 
 ---
 
@@ -146,18 +142,16 @@ work originally done purely for speed. *(~350 lines, done)*
 
 ## Part 2 — SQL layer
 
-### Phase 8 — Rows, keys, and a catalog
-The storage engine only knows `int64 → bytes`. To get tables:
-- **Key**: pack a table ID and primary key into one `int64`
-  (`(table_id << 48) | primary_key`) — keeps each table's rows
-  contiguous, which your Phase 2 segments already specialize on.
-- **Row**: a small binary format — per column, a type tag plus bytes
-  (8 bytes for an int, length-prefixed for text).
-- **Catalog**: reserve table ID 0 for a table describing all other
-  tables' schemas — the same pattern SQLite's `sqlite_master` and
-  Postgres's `pg_catalog` use.
-
-*(~150–200 lines)*
+### Phase 8 — Rows, keys, and a catalog ✅ done
+Had to extend the WAL/`DurableStore` first: they only tracked key
+existence, not real values, so `int64 → bytes` storage didn't
+actually exist yet. Row format (type tag + bytes per column), key
+packing (16-bit table ID + 48-bit primary key, non-negative keys
+only), and a catalog storing schemas as rows under table ID 0 — the
+same pattern SQLite/Postgres use. Catalog rebuilds itself via its own
+WAL replay pass rather than a range query, since `DurableStore` only
+supports point lookups until Phase 10. Proven with a real restart:
+2 tables, 150 rows, all correctly recovered. *(~280 lines, done)*
 
 ### Phase 9 — SQL tokenizer + parser
 A tokenizer (keywords/identifiers/literals/punctuation), then a

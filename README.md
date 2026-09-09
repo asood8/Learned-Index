@@ -420,9 +420,48 @@ Phase 3 refinement built purely for speed turned out to also provide
 real (if partial) resilience against exactly this kind of attack,
 which wasn't the goal when it was built.
 
-## Phase 7 complete
+## Phase 8 — rows, keys, and a catalog
 
-All three parts done: the full size/distribution sweep with real
-memory footprint (7a), an honest comparison against the actual
-published PGM-index (7b), and a real, escalating adversarial finding
-(7c). Only Part 2 (the SQL layer, Phases 8–12) remains on the roadmap.
+The storage engine only ever knew `int64 -> key existence`, not real
+values — Phase 8 had to actually build `int64 -> bytes` first
+(extending the WAL and `DurableStore` from Phase 5), then layer
+tables on top of that.
+
+- **`cpp/write_ahead_log.h` / `cpp/durable_store.h`**: each log record
+  now carries a length-prefixed value alongside its key, and a
+  partial record from a mid-write crash (torn key, length, or value)
+  is dropped rather than misread — real WAL recovery always discards
+  a torn trailing record. `DurableStore` reuses `GappedArray`'s
+  existing no-op-on-duplicate-key behavior (the Phase 4 bugfix) to
+  correctly handle both fresh inserts *and* updates during replay
+  with no special-casing.
+- **`cpp/row_format.h`**: a row is a list of typed values, each
+  encoded as a type tag plus bytes (8 raw bytes for an int,
+  length-prefixed for text) — a simplified version of what SQLite
+  calls its record format.
+- **`cpp/table_key.h`**: packs a 16-bit table ID and a 48-bit primary
+  key into the one `int64` the storage engine understands, keeping
+  every table's rows contiguous and sorted together. Stated plainly:
+  primary keys must be non-negative and fit in 48 bits — not a claim
+  of supporting arbitrary 64-bit keys.
+- **`cpp/catalog.h`**: table ID 0 is reserved for a table describing
+  every other table's schema, stored as ordinary rows in the same
+  engine — the same pattern SQLite's `sqlite_master` and Postgres's
+  `pg_catalog` use. One honest architectural note: `DurableStore` only
+  supports point lookups right now, not "list every key in a range"
+  (that's Phase 10's job), so the catalog rebuilds itself on startup
+  with its own independent pass over the WAL rather than querying the
+  index — a little redundant, but correct, and it doesn't fake a
+  capability that legitimately belongs to a later phase.
+
+**Proven with the same kind of real restart as Phase 5**:
+`cpp/phase8_demo.cpp` creates two tables with different schemas
+(`users`, `products`), inserts 150 rows total, then destroys
+everything and rebuilds both the catalog and the store from the same
+WAL file. Result: both schemas and all 150 rows decode back correctly
+— verified directly, not assumed.
+
+## Next: Phase 9
+
+The SQL tokenizer and parser — turning raw text into something the
+executor (Phase 10) can act on.
