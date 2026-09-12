@@ -1,10 +1,62 @@
-# Learned Index — Phase 0
+# Learned Index DB
 
-Replacing a B-tree lookup with a small model that predicts a key's
-position directly. This is Phase 0: the baselines every later phase
-has to beat.
+A small embedded SQL database in C++17 whose storage engine is a
+learned index instead of a B-tree. To find a key, it evaluates a
+piecewise-linear model that predicts where the key sits in a sorted
+array, then walks from that guess to the exact slot. The design
+follows Kraska et al., "The Case for Learned Index Structures" (2018),
+and borrows from PGM-index (error-bounded segmentation) and ALEX
+(gapped arrays for inserts).
 
-## What's here
+It's embedded in the same sense SQLite is: one process, a write-ahead
+log on disk, and a SQL front end over a storage engine. There are no
+joins, no multi-statement transactions, and no concurrent access.
+
+## Results at a glance
+
+Every number here came from an actual run, on 1M keys unless noted.
+The section in parentheses has the details.
+
+| | result |
+|---|---|
+| Point lookup, skewed keys | 26.9 ns, vs 336.1 ns for a B+-tree and 219.1 ns for binary search (7a) |
+| Point lookup, uniform keys | 147.9 ns, vs 330.1 ns for a B+-tree and 220.7 ns for binary search (7a) |
+| Index memory | 0.000–0.002 bytes/key, vs about 37.3 for the B+-tree (7a) |
+| Inserts | 19,638 ns/insert, about 15.5x faster than shifting a sorted vector (3) |
+| Against the published PGM-index | slower on uniform data (154.7 vs 125.6 ns), about 2x faster on skewed (47.6 vs 104.0 ns) (7b) |
+| Learned Bloom filter | lost badly: 50.4% false positives vs 1.021% for a classic one (6a) |
+| Secondary index | 18–22x faster than a full scan for the same query (stretch goals) |
+
+## Building and running
+
+There's no build system. Each program is one file, compiled directly:
+
+```bash
+mkdir -p results
+python3 python/data_gen.py --n 1000000 --outdir data   # benchmark datasets, needs numpy
+
+# tests
+g++ -O2 -std=c++17 -o cpp/test_suite cpp/test_suite.cpp && ./cpp/test_suite
+g++ -O2 -std=c++17 -o cpp/sql_parser_test cpp/sql_parser_test.cpp && ./cpp/sql_parser_test
+g++ -O2 -std=c++17 -o cpp/executor_test cpp/executor_test.cpp && ./cpp/executor_test
+
+# the SQL shell
+g++ -O2 -std=c++17 -o cpp/repl cpp/repl.cpp && ./cpp/repl
+```
+
+The benchmarks build the same way, and each section below names the
+one it used.
+
+The rest of this file is a build log, written phase by phase as the
+project grew. Each section records what was built, what broke, and
+what the numbers were at the time, so some earlier sections describe
+limitations that later ones fix.
+
+## Phase 0 — baselines
+
+The baselines every later phase has to beat.
+
+### What's here
 
 - `python/data_gen.py` — generates two sorted, unique `int64` key
   sets as raw binary files: `uniform` (evenly spread) and `skewed`
@@ -17,7 +69,7 @@ has to beat.
   a correctness check, then times real lookups with `<chrono>`.
   Appends results to `results/phase0_baseline.csv`.
 
-## How to run it
+### How to run it
 
 ```bash
 python3 python/data_gen.py --n 1000000 --outdir data
@@ -26,7 +78,7 @@ g++ -O2 -std=c++17 -o cpp/benchmark cpp/benchmark.cpp
 ./cpp/benchmark data/skewed_1000000.bin 200000
 ```
 
-## Results (1M keys, 200k random lookups, all hits)
+### Results (1M keys, 200k random lookups, all hits)
 
 | dataset | binary search | B+-tree |
 |---|---|---|
@@ -383,42 +435,56 @@ efficient routing) at a small, real cost on the case that's trivial
 general-purpose library has to make that a narrower, single-purpose
 implementation doesn't.
 
-## Phase 7c — adversarial insert pattern (a real, escalating vulnerability)
+## Phase 7c — adversarial insert pattern
 
-`cpp/adversarial_test.cpp` targets the actual mechanism Phase 3
-built, not a disconnected toy example: both scenarios insert the same
-100,000 keys into an identical 900,000-key starting structure — the
-only difference is whether those keys scatter across the whole key
-range (benign, matching Phase 3's original test) or concentrate into
-one narrow window (adversarial). This is exactly the lever a real
-attacker with insert access has, and it mirrors real published
-research: poisoning attacks on ALEX and PGM-index have been shown to
-degrade performance by up to ~20%.
+`cpp/adversarial_test.cpp` asks what happens when someone with insert
+access concentrates their writes instead of spreading them out. Every
+scenario inserts 100,000 new keys into the same 900,000-key starting
+structure. The benign case scatters them across the whole key range,
+like the Phase 3 benchmark. The adversarial cases cram them into one
+window covering 5%, 2%, or 1.2% of the range, which makes the
+segments in that region run out of gaps and rebalance much more
+often. Published poisoning attacks on ALEX and PGM-index report
+slowdowns of up to about 20%, which gives a rough yardstick.
 
-**A real, escalating effect as the window narrows:**
+The first version of this test ran each scenario once. It reported
++13.6% for the 1.2% window, with the slowdown growing steadily as the
+window shrank. When I reran it later on a different machine, single
+runs of the 1.2% window came back anywhere between −7% and +38%, so
+one run per scenario couldn't separate the effect from ordinary
+timing noise. The test now runs every scenario 9 times, interleaved
+so that drift in machine state hits all of them about equally, and
+compares each adversarial run against the benign run from the same
+round. Two separate 9-round runs:
 
-| attack window | ns/insert | local rebalances | full rebalances | degradation |
+| scenario | local rebalances | full rebalances | median slowdown, run 1 | median slowdown, run 2 |
 |---|---|---|---|---|
-| benign (scattered) | 14,805.1 | 0 | 195 | — |
-| 5.0% of key range | 14,773.9 | 231 | 195 | −0.2% (noise) |
-| 2.0% of key range | 15,320.1 | 795 | 195 | +3.5% |
-| 1.2% of key range | 16,818.2 | 1,096 | **189** | **+13.6%** |
+| benign (scattered) | 0 | 195 | — | — |
+| 5.0% window | 231 | 195 | +4.1% | −0.9% |
+| 2.0% window | 792 | 195 | +8.8% | −4.2% |
+| 1.2% window | 1,096 | 189 | +15.6% | +15.0% |
 
-A mild concentration has no real effect. As it tightens, degradation
-climbs clearly and monotonically, reaching **+13.6%** — comparable to,
-though a bit under, the ~20% figure from real published attacks on
-ALEX/PGM-index. The mechanism is visible directly in the data: full
-rebalance count stays roughly flat (even *dips slightly* at the
-tightest window) while local rebalances climb sharply (231→1,096) —
-Phase 3's per-segment rebalancing is absorbing most of the pressure,
-exactly as it was designed to, avoiding the far more expensive
-full-array rebuilds an attacker might hope to trigger. But absorbing
-isn't free: each local rebalance still costs something, and enough of
-them under concentrated pressure adds up to a real, measurable
-slowdown. This is a genuinely good outcome to report honestly — the
-Phase 3 refinement built purely for speed turned out to also provide
-real (if partial) resilience against exactly this kind of attack,
-which wasn't the goal when it was built.
+The 1.2% window is the only result here I'd trust. Its median came
+out around 15% both times, close to the original 13.6%. Individual
+rounds still varied a lot (from −17% to +51% across all 18), so 15%
+is a typical cost, not a fixed one. The 5% and 2% windows showed no
+consistent effect: slower in one run, faster in the other. The
+"steady escalation" in the original single-run table was noise.
+
+The rebalance counts don't depend on timing, and they tell a clearer
+story. As the window narrows, local rebalances go from 0 to 1,096
+while full rebalances stay flat and even drop slightly, to 189, at
+the tightest window. Phase 3's per-segment rebalancing soaks up
+nearly all of the concentrated pressure, so the attack never gets
+the expensive whole-array rebuilds it's aiming for. Local rebalances
+still cost something, and at the tightest window there are enough of
+them to add up to roughly 15%. That resilience was a side effect,
+since per-segment rebalancing was only added to make ordinary inserts
+faster.
+
+These numbers were measured after the secondary-index fix described
+at the end of this file. That fix changed the 2% window's local
+rebalance count from 795 to 792 and none of the other counts.
 
 ## Phase 8 — rows, keys, and a catalog
 
