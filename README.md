@@ -745,126 +745,150 @@ mattered).
 ## Secondary index on a non-key column (and two bugs it exposed)
 
 `CREATE INDEX idx_age ON users(age);` builds an index on an `INT`
-column, backfilling it from the rows already in the table, and every
-later `INSERT`, `UPDATE`, and `DELETE` keeps it in sync. A `WHERE age
-= 45` on an indexed column then routes to a **secondary index lookup**
-instead of a full scan. The index's metadata lives in the catalog like
-any schema, so it survives a restart.
+column and backfills it from the rows already in the table. After
+that, every `INSERT`, `UPDATE`, and `DELETE` keeps it in sync, and a
+query like `WHERE age = 45` goes through the index instead of
+scanning the whole table. The index definition is stored in the
+catalog like a table schema, so it survives a restart.
 
-It needed no new data structure. Ages repeat, but the learned index
-needs unique keys, so each entry is a composite key: the indexed
-value in the top 20 bits, the row's primary key in the low 28
-(`pack_secondary_composite` in `table_key.h`). Every entry is unique,
-and all rows with `age = 45` sit in one contiguous key range, so the
-lookup is just a range scan over the same gapped array that holds the
-tables. (Simplification, stated plainly: `INT` columns only, values up
-to ~1M, primary keys up to ~268M.)
+No new data structure was needed. Ages repeat, but the learned index
+needs unique keys, so each index entry is a composite key: the
+indexed value in the top 20 bits and the row's primary key in the low
+28 (`pack_secondary_composite` in `table_key.h`). That makes every
+entry unique and puts all the `age = 45` rows in one contiguous key
+range, so the lookup is a range scan over the same gapped array that
+holds the tables. The limits are real: `INT` columns only, values up
+to about 1M, and primary keys up to about 268M.
 
-On the executor test's 1000-row table, `WHERE age = 33` through the
-index vs. `WHERE name = 'user_500'` (no index on `name`, so a full
-scan): **18.1x–22.2x faster across four runs** (6,376–7,745 ns vs
-134,959–155,267 ns).
+On the executor test's 1,000-row table, `WHERE age = 33` through the
+index took 6,376–7,745 ns across four runs. `WHERE name =
+'user_500'`, which has no index and falls back to a full scan, took
+134,959–155,267 ns. That's 18–22x faster.
 
 ### The bug: an index entry that was written but couldn't be found
 
-One test failed: insert a row with age 45, `UPDATE` it to 77, and
-`WHERE age = 77` found nothing, even though the index entry was
-there. The table had ages 20–69, plus one row an earlier test had
-updated to 99. With eps = 64 the index segmented into two pieces: one
-covering ages 20–69 and one starting at the lone 99. A key for age 77
-falls in the first segment's key range, but that segment's line was
-only ever fit up to 69, so for 77 it extrapolated straight past its
-own data: **it predicted slot 1644 in a 1430-slot array, for a key
-whose true position was slot 1407.**
+One test kept failing. It inserts a row with age 45, updates it to
+77, and then queries `WHERE age = 77`. The query came back empty even
+though the index entry was there.
 
-That's the general problem: **the eps guarantee only covers keys the
-model was trained on.** Every key inserted since the last refit, and
-every lookup for a key that isn't there, is untrained, and nothing
-bounded how far those predictions could miss. Four functions each
-scanned the same ±eps window around the prediction, and each went
-wrong in its own way when the window missed:
+The table had ages 20 through 69, plus one row that an earlier test
+had updated to 99. With eps = 64, the index split into two segments:
+one for ages 20–69 and one starting at the lone 99. A key for age 77
+falls inside the first segment's key range, but that segment's line
+had only ever been fit up to 69. For 77 it kept extrapolating past
+its own data and predicted slot 1644. The array only had 1430 slots,
+and the key actually belonged at slot 1407.
 
-- `lower_bound_index()` (range scans) returned a key *later* than the
-  true first match: here the age-99 key at the very end, so the scan
-  saw a key above its bound and stopped immediately. This was the
-  failing test.
-- `insert()` defaulted to "just past the window" when nothing in it
-  qualified, **placing keys out of sorted order**. No existing test
-  caught this. A fuzz run (300 randomized trials of outlier-shaped
-  data with inserts and removes, checked against a `std::set` after
-  every operation) found the array out of order in **284 of 300
-  trials** on the previously committed code.
-- `search()` / `search_explain()` had grown bounded, then full-array,
-  fallback scans during a first attempt at this bug. Point lookups
-  then passed, but only by scanning everywhere. That hid the
-  out-of-order array rather than fixing it (range scans were still
-  wrong in 299 of 300 fuzz trials), and it made **every lookup for an
-  absent key O(n)**: 630,566 ns instead of tens of ns. `insert()` does
-  one of those per new key (its duplicate check), so the Phase 3
-  insert benchmark went from 21,691 to **540,180 ns/insert**, slower
-  than the naive shift-everything vector (263,398 ns) it's supposed to
-  beat. That attempt never shipped.
+The underlying problem is that the eps guarantee only covers keys the
+model was trained on. A key inserted since the last refit is
+untrained, and so is any lookup for a key that isn't there. Nothing
+limited how far off those predictions could be. Four functions
+searched the same ±eps window around the prediction, and each one
+failed differently when the window missed.
 
-### The fix: correctness from sortedness, speed from the model
+`lower_bound_index()`, where range scans start, returned a key later
+than the true first match. In the failing test that was the age-99
+key at the very end of the array, so the scan saw a key above its
+upper bound and stopped immediately.
 
-Two changes, both in `gapped_array.h`:
+`insert()` fell back to "just past the window" when nothing in the
+window qualified, which put keys out of sorted order. No existing
+test caught this. While debugging I ran a fuzz test: 300 randomized
+trials of outlier-shaped data with inserts and removes, checked
+against a `std::set` after every operation. On the committed code the
+array ended up out of order in 284 of the 300 trials.
 
-1. **One walk instead of four windows.** A single `locate()` walks
-   from the predicted slot toward the answer: first left while the
-   slot to the left is a gap or a key ≥ target, then right past gaps
-   and keys < target. After the left walk every real key to the left
-   is < target (the array is sorted), so the first key ≥ target the
-   right walk reaches is the true lower bound, *whatever the model
-   predicted*. For example, slots `[10, _, 20, 30, _, 40, 50, _]`
-   (`_` = gap), first key ≥ 35, bad prediction slot 7: the left walk
-   passes 50, 40, and the gap at slot 4, then stops because slot 3
-   holds 30 < 35; the right walk skips that gap and lands on 40 at
-   slot 5. A prediction of slot 0 reaches the same slot by walking
-   right the whole way. `search`, `search_explain`,
-   `lower_bound_index`, and `insert` all use `locate()` now, so a fix
-   can't land in one of them and be missed in another. That's the
-   pattern that let the Phase 5 clamping bug sit in `search()` for ten
-   phases (see UPDATE/DELETE above), and here it happened again,
-   across four functions at once.
-2. **A segment can't predict past the next segment's anchor.** This
-   is the model-level part: a segment's line was only fit between its
-   own anchor and the next one's (both hit exactly, since anchors are
-   pinned), so its predictions are clamped to that stretch. For the
-   age-77 key the prediction now lands on the age-99 anchor, right
-   where untrained values in that gap belong, instead of off the end
-   of the array.
+`search()` and `search_explain()` had picked up extra fallback scans
+during my first attempt at fixing this, first over a bounded range
+and then over the whole array. Point lookups passed after that, but
+only because they searched everywhere. The array was still out of
+order, and range scans were still wrong in 299 of 300 fuzz trials.
+Worse, every lookup for an absent key became O(n), about 630,000 ns.
+`insert()` does one of those lookups for every new key as its
+duplicate check, so the Phase 3 insert benchmark went from 21,691 to
+540,180 ns per insert. That's slower than the naive vector that
+shifts every element (263,398 ns), which the gapped array exists to
+beat. That version was never committed.
 
-**What this does and doesn't guarantee.** Correctness no longer
-depends on the model at all, only on the array being sorted, which
-`insert()` now maintains because it finds its slot with the same
-walk. Speed still depends on the model: the walk costs O(prediction
-error), so a badly wrong model makes lookups slow, not wrong, and the
-worst case is O(n). The clamp limits the error for untrained keys at
-refit time. The argument: an untrained key's prediction lands between
-its trained neighbors' predictions, or at the next anchor, so it's
-off by at most about eps plus the spacing between those neighbors.
-Drift between refits is limited by the per-segment rebalance
-thresholds. Neither is a hard bound the way eps is for trained keys.
-The other model-level option, forcing extra segment splits around
-outliers, was set aside because it still leaves every untrained
-lookup outside any guarantee. The walk makes every lookup correct,
-and the clamp handles the outlier case that made it slow.
+### The fix
 
-**Measured after the fix:**
-- **All tests pass: 22/22 storage, 20/20 parser, 60/60 executor**,
-  also clean under AddressSanitizer + UBSan (the only report is the
-  B+-tree's known, deliberate leak). The three new storage tests are
-  the failing executor test's exact shape reproduced with no SQL
-  involved, plus 100 randomized outlier trials with inserts and
-  removes, checked against a `std::set` after every operation.
-- The 300-trial fuzz: **0 out-of-order, 0 wrong range scans, 0 wrong
-  point lookups** (was 284 / 299 / 295 on the committed code).
-- Phase 3 insert benchmark (1M uniform keys, 100,265 inserts, same
-  machine, back to back): **21,608 ns/insert before vs 21,537 after,
-  no change.** Skewed: 32,189 vs 28,633, one run each, so not a claim
-  that it's faster.
-- Phase 7c adversarial test: no measurable change, though "measurable"
-  is doing real work there. On this machine its degradation number
-  varies a lot from run to run: the 1.2%-window scenario ranged from
-  −3.7% to +22.8% across five runs before the fix, and −7.0% to
-  +37.9% across four runs after.
+Both changes are in `gapped_array.h`.
+
+The first replaces the four windows with one walk. A new `locate()`
+function starts at the predicted slot and moves left as long as the
+slot to its left is a gap or holds a key ≥ the target. Then it moves
+right past gaps and keys smaller than the target. Once the left walk
+stops, every real key to its left is smaller than the target, because
+the array is sorted. So the first key ≥ the target that the right
+walk reaches is the correct answer, no matter what the model
+predicted.
+
+A small example: the slots hold `[10, _, 20, 30, _, 40, 50, _]`,
+where `_` is a gap. We want the first key ≥ 35, and the model badly
+predicts slot 7. Walking left, it passes the 50 in slot 6, the 40 in
+slot 5, and the gap in slot 4, then stops because slot 3 holds 30,
+which is less than 35. Walking right, it skips the gap and stops at
+40 in slot 5. If the model had predicted slot 0 instead, the right
+walk would have covered the whole distance and reached the same slot.
+
+`search`, `search_explain`, `lower_bound_index`, and `insert` all go
+through `locate()` now. Having one code path matters here. The Phase
+5 clamping bug sat in `search()` for ten phases because it was fixed
+in one function and never copied into its siblings (see UPDATE/DELETE
+above), and this time the same kind of flaw was spread across four
+functions at once.
+
+The second change is at the model level. Each segment's line passes
+exactly through its own first key, so the position where every
+segment starts is known precisely. A segment's line was only fit to
+the keys between its own start and the next segment's start, so its
+predictions are now clamped to that range. For the age-77 key the
+prediction now lands on the age-99 segment's start, which is right
+where values in that gap belong, instead of past the end of the
+array.
+
+### What this guarantees and what it doesn't
+
+Correctness no longer depends on the model at all. It only depends on
+the array staying sorted, and `insert()` keeps it sorted now because
+it finds its slot with the same walk. Speed still depends on the
+model. The walk takes time proportional to how far off the prediction
+is, so a bad model makes lookups slow instead of wrong, and the worst
+case is still O(n).
+
+The clamp limits how far off an untrained key's prediction can be
+right after a refit. Its prediction falls between the predictions for
+its trained neighbors, or at the next segment's start, so it's off by
+at most about eps plus the distance between those neighbors. Between
+refits keys drift, and the per-segment rebalance thresholds keep that
+drift in check. Neither of these is a hard bound the way eps is for
+trained keys.
+
+I also considered fixing this purely at the model level, by forcing
+extra segment splits around outliers. I didn't go that way because
+it would still leave every untrained lookup without a guarantee. The
+walk makes every lookup correct, and the clamp handles the outlier
+case that made it slow.
+
+### Results after the fix
+
+All tests pass: 22/22 storage tests, 20/20 parser tests, and 60/60
+executor tests. They also run clean under AddressSanitizer and UBSan,
+apart from the B+-tree's known leak. The three new storage tests
+recreate the failing executor case without any SQL, and run 100
+randomized outlier trials with inserts and removes, checked against a
+`std::set` after every operation.
+
+The 300-trial fuzz test now finds nothing wrong: no out-of-order
+arrays, no wrong range scans, and no wrong point lookups, down from
+284, 299, and 295 failing trials.
+
+Insert speed didn't change. On the Phase 3 benchmark (1M uniform
+keys, 100,265 inserts, run back to back on the same machine) it was
+21,608 ns per insert before the fix and 21,537 after. The skewed
+dataset went from 32,189 to 28,633, but that's one run each, so I'm
+not calling it an improvement.
+
+The Phase 7c adversarial test didn't show a change either, though
+single runs of it were too noisy to compare before and after. The
+multi-round medians in that section were measured after this fix.
