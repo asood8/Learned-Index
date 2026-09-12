@@ -42,27 +42,16 @@ class GappedArray {
     return ga;
   }
 
+  // A key is present iff the first real key >= it *is* it. Goes
+  // through the same locate() walk as every other lookup below, so
+  // there's one place where a prediction becomes an answer -- not
+  // four near-copies that each have to get the edge cases right on
+  // their own (see locate() for why that stopped being hypothetical).
   bool search(int64_t key, size_t& out_index) const {
-    if (model_.segments.empty()) return false;
-    const int64_t predicted = predict(key);
-    const int64_t n = static_cast<int64_t>(data_.size());
-    // Clamped with std::clamp, not separate max/min -- a prediction
-    // extrapolated far beyond the array (as happens for a key well
-    // outside the trained range) could otherwise produce lo > hi from
-    // clamping each bound against a different limit independently,
-    // silently emptying the search window instead of narrowing it.
-    // This is the exact bug fixed in insert() and lower_bound_index()
-    // back in Phase 5 and 10 -- it just never got applied here, since
-    // search() itself was never the one that found it originally.
-    const int64_t lo = std::clamp<int64_t>(predicted - eps_, 0, n - 1);
-    const int64_t hi = std::clamp<int64_t>(predicted + eps_, 0, n - 1);
-    for (int64_t idx = lo; idx <= hi; idx++) {
-      if (data_[idx] == key) {
-        out_index = static_cast<size_t>(idx);
-        return true;
-      }
-    }
-    return false;
+    const size_t idx = lower_bound_index(key);
+    if (idx == data_.size() || data_[idx] != key) return false;
+    out_index = idx;
+    return true;
   }
 
   // Removes a key by turning its slot back into a gap -- reusing the
@@ -87,48 +76,27 @@ class GappedArray {
   };
 
   // Identical logic to search(), but tracks and returns the model's
-  // raw prediction and how many slots the local search actually
-  // examined -- for Phase 12's EXPLAIN, kept as a separate method so
-  // the extra bookkeeping never costs anything on the real query path.
+  // raw prediction and how many slots the walk actually examined --
+  // for Phase 12's EXPLAIN, kept as a separate method so the extra
+  // bookkeeping never costs anything on the real query path.
   SearchDiagnostics search_explain(int64_t key) const {
     SearchDiagnostics diag;
     if (model_.segments.empty()) return diag;
     diag.predicted_position = predict(key);
-    const int64_t n = static_cast<int64_t>(data_.size());
-    const int64_t lo = std::clamp<int64_t>(diag.predicted_position - eps_, 0, n - 1);
-    const int64_t hi = std::clamp<int64_t>(diag.predicted_position + eps_, 0, n - 1);
-    for (int64_t idx = lo; idx <= hi; idx++) {
-      diag.probes++;
-      if (data_[idx] == key) {
-        diag.found = true;
-        diag.index = static_cast<size_t>(idx);
-        return diag;
-      }
+    const size_t idx = locate(diag.predicted_position, key, &diag.probes);
+    if (idx < data_.size() && data_[idx] == key) {
+      diag.found = true;
+      diag.index = idx;
     }
     return diag;
   }
 
   // Returns the physical index of the first real (non-empty) key >=
-  // target, or capacity() if no such key exists. Structurally
-  // identical to insert()'s own "find insertion point" logic -- same
-  // predict-then-scan-the-window technique, just without requiring an
-  // exact match. If the eps window genuinely doesn't contain the
-  // answer (a bad prediction, or target beyond every real key), falls
-  // back to scanning outward rather than silently returning a wrong
-  // answer -- correctness over speed in the rare case this triggers.
+  // target, or capacity() if no such key exists. Range scans start
+  // here; search() and insert() are built on the same locate() walk.
   size_t lower_bound_index(int64_t target) const {
-    const int64_t n = static_cast<int64_t>(data_.size());
-    if (model_.segments.empty() || n == 0) return static_cast<size_t>(n);
-    const int64_t predicted = predict(target);
-    const int64_t lo = std::clamp<int64_t>(predicted - eps_, 0, n - 1);
-    const int64_t hi = std::clamp<int64_t>(predicted + eps_, 0, n - 1);
-    for (int64_t idx = lo; idx <= hi; idx++) {
-      if (data_[idx] != EMPTY_SLOT && data_[idx] >= target) return static_cast<size_t>(idx);
-    }
-    for (int64_t idx = hi + 1; idx < n; idx++) {
-      if (data_[idx] != EMPTY_SLOT && data_[idx] >= target) return static_cast<size_t>(idx);
-    }
-    return static_cast<size_t>(n);
+    if (model_.segments.empty() || data_.empty()) return data_.size();
+    return locate(predict(target), target, nullptr);
   }
 
   // All real keys in [lo, hi], inclusive, in sorted order. Correctness
@@ -161,27 +129,19 @@ class GappedArray {
       return;
     }
 
-    size_t existing_idx;
-    if (search(key, existing_idx)) return;  // key already present: no-op, not a second copy
-
+    // The insertion point is exactly the lower bound: the first real
+    // key >= this one. This used to come from scanning the +/-eps
+    // window and defaulting to "just past the window" when nothing in
+    // it qualified -- which put the key out of sorted order whenever
+    // its true spot lay outside the window (see locate()). Getting it
+    // from locate() instead makes placement correct however far off
+    // the prediction was, and doubles as the duplicate check,
+    // replacing what used to be a separate search() call.
     const size_t owning_segment = find_segment_index(model_.segments, key);
-    const int64_t predicted = predict_from(owning_segment, key);
-    const int64_t n = static_cast<int64_t>(data_.size());
-    // Clamp into [0, n-1] rather than just capping one side: a
-    // prediction extrapolated far outside a segment's trained range
-    // (as happens for a key approaching from the opposite direction
-    // a segment was built for) can be wildly negative or huge, and an
-    // un-clamped hi could end up negative, leaving insertion_point
-    // negative below.
-    const int64_t lo = std::clamp<int64_t>(predicted - eps_, 0, n - 1);
-    const int64_t hi = std::clamp<int64_t>(predicted + eps_, 0, n - 1);
-
-    int64_t insertion_point = hi + 1;
-    for (int64_t idx = lo; idx <= hi; idx++) {
-      if (data_[idx] != EMPTY_SLOT && data_[idx] >= key) {
-        insertion_point = idx;
-        break;
-      }
+    const int64_t insertion_point =
+        static_cast<int64_t>(locate(predict_from(owning_segment, key), key, nullptr));
+    if (insertion_point < static_cast<int64_t>(data_.size()) && data_[insertion_point] == key) {
+      return;  // key already present: no-op, not a second copy
     }
 
     const int64_t gap = find_nearest_gap(insertion_point);
@@ -241,10 +201,74 @@ class GappedArray {
     return predict_from(find_segment_index(model_.segments, key), key);
   }
 
+  // A segment's line was only fit to keys between its own anchor and
+  // the next segment's anchor, so its prediction is clamped to that
+  // physical stretch. Without this, a query for a value the segment
+  // never saw -- age=77 in a segment whose last trained key is age=69,
+  // when the next segment starts at an outlier age=99 -- extrapolates
+  // the line straight past the next anchor: it predicted slot 1644 in
+  // a 1430-slot array, for a key whose lower bound was slot 1407. The
+  // clamp stops it at the next anchor instead, next to where the key
+  // actually belongs. Anchors are hit exactly by construction
+  // (build_segmented_model pins them), so this needs no extra storage.
+  //
+  // This is a model-level bound, but not a correctness guarantee on
+  // its own -- keys drift between refits. locate() is what makes the
+  // answer correct; this is what keeps locate()'s walk short.
   int64_t predict_from(size_t seg_idx, int64_t key) const {
     const Segment& seg = model_.segments[seg_idx];
-    const double p = seg.slope * static_cast<double>(key) + seg.intercept;
+    double p = seg.slope * static_cast<double>(key) + seg.intercept;
+    if (key >= seg.start_key) p = std::max(p, anchor_position(seg));
+    if (seg_idx + 1 < model_.segments.size()) p = std::min(p, anchor_position(model_.segments[seg_idx + 1]));
+    // and never outside the array itself -- which also keeps llround
+    // away from doubles too large to fit in an int64_t
+    p = std::clamp(p, 0.0, static_cast<double>(data_.size()));
     return static_cast<int64_t>(std::llround(p));
+  }
+
+  static double anchor_position(const Segment& seg) {
+    return seg.slope * static_cast<double>(seg.start_key) + seg.intercept;
+  }
+
+  // The one place a prediction becomes an answer: the physical index
+  // of the first real key >= target, or data_.size() if there isn't
+  // one. Walks from the predicted slot toward the answer, in whichever
+  // direction the stored keys say it lies:
+  //   1. step left while the slot to the left is a gap or holds a key
+  //      >= target -- the answer can't be to the right of either;
+  //   2. step right past gaps and keys < target.
+  // After step 1, every real key left of i is < target (the array is
+  // sorted, and the walk stopped at one that is), so the first real
+  // key >= target that step 2 reaches is the true lower bound. That
+  // holds whatever the model predicted: the model only decides where
+  // the walk starts, i.e. how long it is.
+  //
+  // This replaced a fixed +/-eps window. The eps guarantee only covers
+  // keys the model was trained on; for any other key (one inserted
+  // since the last refit, or a query for an absent one) nothing bounds
+  // how far a prediction can miss, and each function that scanned the
+  // window had its own way of being wrong when it did:
+  // lower_bound_index() returned a later key than the true first one,
+  // insert() placed keys out of sorted order, and search() had grown a
+  // full-array fallback that made every absent-key lookup -- including
+  // insert()'s own duplicate check -- O(n). The cost is now O(distance
+  // from prediction to answer) rather than a fixed window.
+  size_t locate(int64_t predicted, int64_t target, int* probes) const {
+    const int64_t n = static_cast<int64_t>(data_.size());
+    int64_t i = std::clamp<int64_t>(predicted, 0, n);
+    int examined = 0;
+    while (i > 0) {
+      examined++;
+      if (data_[i - 1] < target) break;  // gaps are EMPTY_SLOT = INT64_MAX, never < target
+      i--;
+    }
+    while (i < n) {
+      examined++;
+      if (data_[i] != EMPTY_SLOT && data_[i] >= target) break;
+      i++;
+    }
+    if (probes != nullptr) *probes = examined;
+    return static_cast<size_t>(i);
   }
 
   int64_t find_nearest_gap(int64_t start) const {

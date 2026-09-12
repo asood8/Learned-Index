@@ -3,6 +3,7 @@
 // actual returned rows -- not just that execution didn't crash.
 // Prints which access_method each query took, which is the whole
 // point of this phase made visible.
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <string>
@@ -262,6 +263,105 @@ int main() {
   {
     auto res = run("SELECT SUM(name) FROM users;");
     check(!res.success, "SUM on a TEXT column is rejected");
+  }
+
+  // Secondary index: create on an existing table (must backfill)
+  {
+    auto res = run("CREATE INDEX idx_age ON users(age);");
+    check(res.success, "CREATE INDEX on an existing table succeeds (backfill)");
+  }
+  {
+    auto res = run("CREATE INDEX idx_age ON users(age);");
+    check(!res.success, "creating a duplicate-named index is rejected");
+  }
+  {
+    auto res = run("CREATE INDEX idx_name ON users(name);");
+    check(!res.success, "secondary index on a TEXT column is rejected");
+  }
+
+  // correctness: index lookup must return the exact same rows a full
+  // scan would, not just *some* rows
+  {
+    auto filtered = run("SELECT * FROM users WHERE age = 45;");
+    check(filtered.access_method == "secondary index lookup", "WHERE on an indexed column uses the index now");
+
+    // build the expected set by temporarily reasoning about the data directly
+    auto full = run("SELECT * FROM users;");
+    int expected = 0;
+    for (auto& row : full.rows) {
+      if (row[2].int_val == 45) expected++;
+    }
+    check(static_cast<int>(filtered.rows.size()) == expected, "index lookup returns the correct row count");
+    std::printf("    (debug: index lookup returned %zu rows, full-scan-derived expected %d)\n", filtered.rows.size(),
+                expected);
+    bool all_match = true;
+    for (auto& row : filtered.rows) {
+      if (row[2].int_val != 45) all_match = false;
+    }
+    check(all_match, "every row from the index lookup actually has age = 45");
+  }
+
+  // the index has to stay in sync with writes, not just reflect
+  // whatever existed at CREATE INDEX time
+  {
+    run("INSERT INTO users VALUES (9001, 'fresh_insert', 45);");
+    auto res = run("SELECT * FROM users WHERE age = 45;");
+    bool found_new = false;
+    for (auto& row : res.rows) {
+      if (row[0].int_val == 9001) found_new = true;
+    }
+    check(found_new, "a new INSERT is immediately visible via the secondary index");
+  }
+  {
+    run("UPDATE users SET age = 77 WHERE id = 9001;");
+    auto old_val = run("SELECT * FROM users WHERE age = 45;");
+    bool still_there_at_old = false;
+    for (auto& row : old_val.rows) {
+      if (row[0].int_val == 9001) still_there_at_old = true;
+    }
+    check(!still_there_at_old, "UPDATE removes the stale entry from the secondary index");
+    auto new_val = run("SELECT * FROM users WHERE age = 77;");
+    bool found_at_new = false;
+    for (auto& row : new_val.rows) {
+      if (row[0].int_val == 9001) found_at_new = true;
+    }
+    check(found_at_new, "UPDATE adds the correct new entry to the secondary index");
+  }
+  {
+    run("DELETE FROM users WHERE id = 9001;");
+    auto res = run("SELECT * FROM users WHERE age = 77;");
+    bool still_present = false;
+    for (auto& row : res.rows) {
+      if (row[0].int_val == 9001) still_present = true;
+    }
+    check(!still_present, "DELETE removes the entry from the secondary index too");
+  }
+
+  // durability: the index itself has to survive a restart, not just
+  // the base table
+  {
+    DurableStore restarted(wal_path, 0.7, 64);
+    Catalog restarted_catalog(restarted, wal_path);
+    Executor restarted_exec(restarted, restarted_catalog);
+    auto res = restarted_exec.execute(parse_sql("SELECT * FROM users WHERE age = 45;"));
+    check(res.access_method == "secondary index lookup", "the secondary index itself survives a restart");
+  }
+
+  // the actual point of this stretch goal: prove the speedup is real
+  {
+    auto t0 = std::chrono::steady_clock::now();
+    for (int i = 0; i < 200; i++) run("SELECT * FROM users WHERE age = 33;");
+    auto t1 = std::chrono::steady_clock::now();
+    double indexed_ns = std::chrono::duration<double, std::nano>(t1 - t0).count() / 200;
+
+    auto t2 = std::chrono::steady_clock::now();
+    for (int i = 0; i < 200; i++) run("SELECT * FROM users WHERE name = 'user_500';");  // no index on name
+    auto t3 = std::chrono::steady_clock::now();
+    double full_scan_ns = std::chrono::duration<double, std::nano>(t3 - t2).count() / 200;
+
+    std::printf("    (indexed lookup: %.0f ns, full scan: %.0f ns, speedup: %.1fx)\n", indexed_ns, full_scan_ns,
+                full_scan_ns / indexed_ns);
+    check(indexed_ns < full_scan_ns, "the secondary index is actually faster than a full scan, not just correct");
   }
 
   std::printf("\n%d/%d tests passed\n", tests_passed, tests_run);

@@ -8,6 +8,8 @@
 #include <cstdint>
 #include <cstdio>
 #include <random>
+#include <set>
+#include <string>
 #include <vector>
 
 #include "bplus_tree.h"
@@ -154,11 +156,82 @@ void test_gapped_array() {
   check(all_found, "100k shuffled-order inserts (new seed): every original and inserted key found");
 }
 
+// The secondary-index bug, reproduced at the storage layer with no SQL
+// involved: composite (value << 28 | pk) keys form a staircase, an
+// outlier value stretches a segment's key range, and new keys are
+// inserted with values the model was never trained on. Checked only
+// through the public API, against a std::set ground truth: a full-range
+// scan catches any key placed out of sorted order, and a per-value scan
+// catches a lower bound that lands past the real first match
+// (range_scan_keys stops at the first key above its upper bound).
+void test_untrained_keys() {
+  std::printf("-- untrained keys in outlier-stretched segments --\n");
+  auto composite = [](int64_t value, int64_t pk) { return (value << 28) | pk; };
+  auto scan_all = [](const GappedArray& g) { return g.range_scan_keys(INT64_MIN, INT64_MAX - 1); };
+
+  // the exact shape of the failing executor test: ages 20..69, one row
+  // updated to 99, then new rows at ages in between
+  std::set<int64_t> truth;
+  for (int64_t i = 0; i < 1000; i++) truth.insert(composite(20 + i % 50, i));
+  truth.insert(composite(99, 1000));
+  GappedArray ga = GappedArray::build(std::vector<int64_t>(truth.begin(), truth.end()), 0.7, 64);
+  bool each_found = true;
+  for (int64_t v = 70; v <= 98; v++) {
+    const int64_t k = composite(v, 5000 + v);
+    ga.insert(k);
+    truth.insert(k);
+    if (ga.range_scan_keys(composite(v, 0), composite(v, (1 << 28) - 1)) != std::vector<int64_t>{k}) {
+      each_found = false;
+    }
+  }
+  check(each_found, "values inserted between the data and an outlier: each found by its own range scan");
+  check(scan_all(ga) == std::vector<int64_t>(truth.begin(), truth.end()),
+        "values inserted between the data and an outlier: full scan still sorted and complete");
+
+  int bad_trials = 0;
+  for (int t = 0; t < 100; t++) {
+    std::mt19937_64 rng(5000 + t);
+    const int64_t eps = std::vector<int64_t>{4, 16, 64}[rng() % 3];
+    const int64_t distinct = 20 + static_cast<int64_t>(rng() % 50);
+    std::set<int64_t> keys;
+    int64_t pk = 1;
+    for (int64_t v = 0; v < distinct; v++) {
+      const int rows = 1 + static_cast<int>(rng() % 40);
+      for (int r = 0; r < rows; r++) keys.insert(composite(v, pk++));
+    }
+    const int outliers = 1 + static_cast<int>(rng() % 3);
+    for (int o = 0; o < outliers; o++) keys.insert(composite(distinct + 20 + static_cast<int64_t>(rng() % 5000), pk++));
+
+    GappedArray g = GappedArray::build(std::vector<int64_t>(keys.begin(), keys.end()), 0.7, eps);
+    bool ok = true;
+    for (int op = 0; op < 300 && ok; op++) {
+      if (rng() % 5 == 0) {
+        auto it = std::next(keys.begin(), static_cast<long>(rng() % keys.size()));
+        g.remove(*it);
+        keys.erase(it);
+      } else {
+        const int64_t k = composite(static_cast<int64_t>(rng() % (distinct + 5000)), pk++);
+        g.insert(k);
+        keys.insert(k);
+      }
+      ok = scan_all(g) == std::vector<int64_t>(keys.begin(), keys.end());
+    }
+    size_t idx;
+    for (int64_t k : keys) {
+      if (!g.search(k, idx)) ok = false;
+    }
+    if (g.search(composite(999999, 0), idx)) ok = false;
+    if (!ok) bad_trials++;
+  }
+  check(bad_trials == 0, "100 randomized outlier trials (inserts + removes): scans and lookups match ground truth");
+}
+
 int main() {
   test_bplus_tree();
   test_linear_model();
   test_segmented_model();
   test_gapped_array();
+  test_untrained_keys();
 
   std::printf("\n%d/%d tests passed\n", tests_passed, tests_run);
   return (tests_passed == tests_run) ? 0 : 1;

@@ -27,3 +27,24 @@ constexpr int32_t unpack_table_id(int64_t packed) {
 }
 
 constexpr int64_t unpack_primary_key(int64_t packed) { return packed & PRIMARY_KEY_MASK; }
+
+// A secondary index on a non-key column has a problem the primary
+// index never does: values repeat (many rows can share the same
+// age). The whole point of this composite-key trick is that it
+// doesn't need a different data structure to handle that -- pairing
+// the (possibly-duplicate) indexed value with the always-unique
+// primary key makes every composite key unique again, so it fits the
+// exact same learned-index machinery the primary key already uses.
+// 20 bits for the value (up to ~1,048,575 -- fine for something like
+// age or a price, not a claim of supporting arbitrary-range columns)
+// + 28 bits for the primary key it belongs to.
+constexpr int64_t SECONDARY_VALUE_BITS = 20;
+constexpr int64_t SECONDARY_PK_BITS = PRIMARY_KEY_BITS - SECONDARY_VALUE_BITS;
+constexpr int64_t SECONDARY_VALUE_MASK = (int64_t{1} << SECONDARY_VALUE_BITS) - 1;
+constexpr int64_t SECONDARY_PK_MASK = (int64_t{1} << SECONDARY_PK_BITS) - 1;
+
+constexpr int64_t pack_secondary_composite(int64_t value, int64_t primary_key) {
+  return ((value & SECONDARY_VALUE_MASK) << SECONDARY_PK_BITS) | (primary_key & SECONDARY_PK_MASK);
+}
+
+constexpr int64_t unpack_secondary_pk(int64_t composite) { return composite & SECONDARY_PK_MASK; }

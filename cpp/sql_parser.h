@@ -32,7 +32,12 @@ class Parser {
       stmt.is_explain = true;
       return stmt;
     }
-    if (check_keyword("CREATE")) return parse_create_table();
+    if (check_keyword("CREATE")) {
+      // peek past CREATE without consuming it yet, to see which kind
+      const Token& next = tokens_[pos_ + 1];
+      if (next.type == TokenType::KEYWORD && next.text == "INDEX") return parse_create_index();
+      return parse_create_table();
+    }
     if (check_keyword("INSERT")) return parse_insert();
     if (check_keyword("SELECT")) return parse_select();
     if (check_keyword("UPDATE")) return parse_update();
@@ -228,6 +233,20 @@ class Parser {
       stmt.has_where = true;
       stmt.where = parse_where_clause();
     }
+    skip_trailing_semicolon();
+    return stmt;
+  }
+
+  CreateIndexStmt parse_create_index() {
+    expect_keyword("CREATE");
+    expect_keyword("INDEX");
+    CreateIndexStmt stmt;
+    stmt.index_name = expect(TokenType::IDENTIFIER, "index name").text;
+    expect_keyword("ON");
+    stmt.table_name = expect(TokenType::IDENTIFIER, "table name").text;
+    expect(TokenType::LPAREN, "'('");
+    stmt.column_name = expect(TokenType::IDENTIFIER, "column name").text;
+    expect(TokenType::RPAREN, "')'");
     skip_trailing_semicolon();
     return stmt;
   }

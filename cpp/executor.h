@@ -85,6 +85,7 @@ class Executor {
     const int64_t primary_key = stmt.values[0].int_val;
     const int64_t key = pack_key(schema->table_id, primary_key);
     store_.put(key, encode_row(stmt.values));
+    sync_indexes(*schema, 0, nullptr, primary_key, &stmt.values);
     return result;
   }
 
@@ -124,6 +125,28 @@ class Executor {
       if (stmt.is_explain) {
         result.explain_text =
             "range scan over the gapped array -- returned " + std::to_string(result.rows.size()) + " row(s)";
+      }
+    } else if (stmt.where.op == CompareOp::EQ &&
+               catalog_.find_index_for_column(schema->table_id, find_column_index(*schema, stmt.where.column)) !=
+                   nullptr) {
+      // A secondary index exists on this exact column -- this is the
+      // whole point of this stretch goal made real: a non-key column
+      // equality lookup no longer has to fall through to a full scan.
+      result.access_method = "secondary index lookup";
+      const IndexInfo* idx =
+          catalog_.find_index_for_column(schema->table_id, find_column_index(*schema, stmt.where.column));
+      const int64_t lo = pack_key(idx->index_storage_id, pack_secondary_composite(stmt.where.value.int_val, 0));
+      const int64_t hi =
+          pack_key(idx->index_storage_id, pack_secondary_composite(stmt.where.value.int_val, SECONDARY_PK_MASK));
+      for (auto& [composite_key, unused_val] : store_.range_scan(lo, hi)) {
+        (void)unused_val;
+        const int64_t pk = unpack_secondary_pk(unpack_primary_key(composite_key));
+        std::string raw;
+        if (store_.get(pack_key(schema->table_id, pk), raw)) result.rows.push_back(decode_row(raw));
+      }
+      if (stmt.is_explain) {
+        result.explain_text = "secondary index lookup on '" + stmt.where.column + "' -- returned " +
+                               std::to_string(result.rows.size()) + " row(s), no full scan needed";
       }
     } else {
       // Anything else -- a non-key column, or an operator we didn't
@@ -213,6 +236,7 @@ class Executor {
     }
 
     for (auto& [old_key, row] : find_matches(*schema, stmt.has_where ? &stmt.where : nullptr)) {
+      const std::vector<Value> old_row = row;  // captured before modification, for index sync
       bool pk_changed = false;
       for (const auto& assign : stmt.assignments) {
         const int col_idx = find_column_index(*schema, assign.column);
@@ -226,6 +250,7 @@ class Executor {
       const int64_t new_key = pk_changed ? pack_key(schema->table_id, row[0].int_val) : old_key;
       if (pk_changed) store_.remove(old_key);
       store_.put(new_key, encode_row(row));
+      sync_indexes(*schema, unpack_primary_key(old_key), &old_row, unpack_primary_key(new_key), &row);
       result.rows_affected++;
     }
     return result;
@@ -241,8 +266,57 @@ class Executor {
     }
 
     for (auto& [key, row] : find_matches(*schema, stmt.has_where ? &stmt.where : nullptr)) {
-      (void)row;
-      if (store_.remove(key)) result.rows_affected++;
+      if (store_.remove(key)) {
+        sync_indexes(*schema, unpack_primary_key(key), &row, 0, nullptr);
+        result.rows_affected++;
+      }
+    }
+    return result;
+  }
+
+  QueryResult execute_one(const CreateIndexStmt& stmt) {
+    QueryResult result;
+    const TableSchema* schema = catalog_.get_table(stmt.table_name);
+    if (!schema) {
+      result.success = false;
+      result.error = "no such table: " + stmt.table_name;
+      return result;
+    }
+    const int col_idx = find_column_index(*schema, stmt.column_name);
+    if (col_idx < 0) {
+      result.success = false;
+      result.error = "no such column: " + stmt.column_name;
+      return result;
+    }
+    if (schema->columns[col_idx].type != ColumnType::INT64) {
+      result.success = false;
+      result.error = "secondary indexes are only supported on INT columns, got TEXT column: " + stmt.column_name;
+      return result;
+    }
+
+    const int32_t storage_id = catalog_.create_index(stmt.index_name, schema->table_id, col_idx);
+    if (storage_id < 0) {
+      result.success = false;
+      result.error = "index already exists: " + stmt.index_name;
+      return result;
+    }
+
+    // Backfill: an index created on a table that already has data
+    // needs every existing row added, not just future ones. Sorted
+    // by composite key first -- bulk-inserting in primary-key order
+    // instead would swing the indexed value wildly from one insert to
+    // the next (unlike a steady stream of ordinary single-row writes,
+    // which this same insert path already handles correctly), and a
+    // one-time bulk operation has the luxury of sorting first.
+    std::vector<std::pair<int64_t, int64_t>> composites;  // (composite_key, unused)
+    for (auto& [key, row] : collect_matches(*schema, 0, PRIMARY_KEY_MASK, nullptr)) {
+      const int64_t pk = unpack_primary_key(key);
+      composites.emplace_back(pack_secondary_composite(row[col_idx].int_val, pk), 0);
+    }
+    std::sort(composites.begin(), composites.end());
+    for (const auto& [composite, unused] : composites) {
+      (void)unused;
+      store_.put(pack_key(storage_id, composite), "");
     }
     return result;
   }
@@ -295,6 +369,26 @@ class Executor {
       if (schema.columns[i].name == name) return static_cast<int>(i);
     }
     return -1;
+  }
+
+  // Keeps every secondary index on a table in sync with a single
+  // write. Pass old_row (with the pre-write values) for an update or
+  // delete, new_row (with the post-write values) for an insert or
+  // update -- both for an update, since the indexed column's value
+  // (or the primary key itself) may have changed and the old
+  // composite entry has to be removed before the new one is added.
+  void sync_indexes(const TableSchema& schema, int64_t old_pk, const std::vector<Value>* old_row, int64_t new_pk,
+                     const std::vector<Value>* new_row) {
+    for (const IndexInfo& idx : catalog_.indexes_for_table(schema.table_id)) {
+      if (old_row) {
+        const int64_t old_composite = pack_secondary_composite((*old_row)[idx.column_idx].int_val, old_pk);
+        store_.remove(pack_key(idx.index_storage_id, old_composite));
+      }
+      if (new_row) {
+        const int64_t new_composite = pack_secondary_composite((*new_row)[idx.column_idx].int_val, new_pk);
+        store_.put(pack_key(idx.index_storage_id, new_composite), "");
+      }
+    }
   }
 
   bool matches(const TableSchema& schema, const std::vector<Value>& row, const WhereClause& where) {

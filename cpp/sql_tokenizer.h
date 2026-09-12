@@ -44,7 +44,7 @@ inline bool is_keyword(const std::string& upper) {
       "CREATE", "TABLE",  "INSERT", "INTO",   "VALUES", "SELECT", "FROM",
       "WHERE",  "AND",    "BETWEEN", "INT",   "TEXT",   "EXPLAIN",
       "UPDATE", "SET",    "DELETE", "ORDER",  "BY",     "ASC",
-      "DESC",   "LIMIT",  "COUNT",  "SUM"};
+      "DESC",   "LIMIT",  "COUNT",  "SUM",    "INDEX",  "ON"};
   for (const auto& kw : kKeywords) {
     if (upper == kw) return true;
   }

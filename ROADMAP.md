@@ -213,11 +213,13 @@ real SQL front end, both proven with real tests and real benchmarks
 at every step. Everything below is optional.
 
 ## Stretch goals (roughly in order of payoff)
-- `UPDATE` / `DELETE` — mechanically similar to `INSERT`, reuses the
+- ✅ `UPDATE` / `DELETE` — mechanically similar to `INSERT`, reuses the
   executor's `WHERE`-matching.
-- `ORDER BY`, `LIMIT`, `COUNT`/`SUM`.
-- A second index on a non-key column — forces you to confront *why*
-  only one column gets the fast path, deepening the index story.
+- ✅ `ORDER BY`, `LIMIT`, `COUNT`/`SUM`.
+- ✅ A second index on a non-key column — forces you to confront *why*
+  only one column gets the fast path, deepening the index story. (It
+  did: it exposed that the eps guarantee never covered untrained keys,
+  see the README.)
 
 ## Explicitly out of scope (say so in the README)
 Multi-table joins, transactions spanning multiple statements, and

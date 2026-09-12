@@ -70,4 +70,10 @@ struct DeleteStmt {
   WhereClause where;
 };
 
-using Statement = std::variant<CreateTableStmt, InsertStmt, SelectStmt, UpdateStmt, DeleteStmt>;
+struct CreateIndexStmt {
+  std::string index_name;
+  std::string table_name;
+  std::string column_name;
+};
+
+using Statement = std::variant<CreateTableStmt, InsertStmt, SelectStmt, UpdateStmt, DeleteStmt, CreateIndexStmt>;
