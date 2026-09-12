@@ -46,8 +46,16 @@ class GappedArray {
     if (model_.segments.empty()) return false;
     const int64_t predicted = predict(key);
     const int64_t n = static_cast<int64_t>(data_.size());
-    const int64_t lo = std::max<int64_t>(0, predicted - eps_);
-    const int64_t hi = std::min<int64_t>(n - 1, predicted + eps_);
+    // Clamped with std::clamp, not separate max/min -- a prediction
+    // extrapolated far beyond the array (as happens for a key well
+    // outside the trained range) could otherwise produce lo > hi from
+    // clamping each bound against a different limit independently,
+    // silently emptying the search window instead of narrowing it.
+    // This is the exact bug fixed in insert() and lower_bound_index()
+    // back in Phase 5 and 10 -- it just never got applied here, since
+    // search() itself was never the one that found it originally.
+    const int64_t lo = std::clamp<int64_t>(predicted - eps_, 0, n - 1);
+    const int64_t hi = std::clamp<int64_t>(predicted + eps_, 0, n - 1);
     for (int64_t idx = lo; idx <= hi; idx++) {
       if (data_[idx] == key) {
         out_index = static_cast<size_t>(idx);
@@ -55,6 +63,89 @@ class GappedArray {
       }
     }
     return false;
+  }
+
+  // Removes a key by turning its slot back into a gap -- reusing the
+  // exact concept that makes inserts cheap in the first place, rather
+  // than needing a separate "tombstone" mechanism. The model isn't
+  // touched: it was never a promise about which slots are occupied,
+  // only where a given key's slot *would be* if present, and that's
+  // still true for every other key after this one is gone.
+  bool remove(int64_t key) {
+    size_t idx;
+    if (!search(key, idx)) return false;
+    data_[idx] = EMPTY_SLOT;
+    count_--;
+    return true;
+  }
+
+  struct SearchDiagnostics {
+    bool found = false;
+    size_t index = 0;
+    int64_t predicted_position = 0;
+    int probes = 0;  // slots actually examined during the local scan
+  };
+
+  // Identical logic to search(), but tracks and returns the model's
+  // raw prediction and how many slots the local search actually
+  // examined -- for Phase 12's EXPLAIN, kept as a separate method so
+  // the extra bookkeeping never costs anything on the real query path.
+  SearchDiagnostics search_explain(int64_t key) const {
+    SearchDiagnostics diag;
+    if (model_.segments.empty()) return diag;
+    diag.predicted_position = predict(key);
+    const int64_t n = static_cast<int64_t>(data_.size());
+    const int64_t lo = std::clamp<int64_t>(diag.predicted_position - eps_, 0, n - 1);
+    const int64_t hi = std::clamp<int64_t>(diag.predicted_position + eps_, 0, n - 1);
+    for (int64_t idx = lo; idx <= hi; idx++) {
+      diag.probes++;
+      if (data_[idx] == key) {
+        diag.found = true;
+        diag.index = static_cast<size_t>(idx);
+        return diag;
+      }
+    }
+    return diag;
+  }
+
+  // Returns the physical index of the first real (non-empty) key >=
+  // target, or capacity() if no such key exists. Structurally
+  // identical to insert()'s own "find insertion point" logic -- same
+  // predict-then-scan-the-window technique, just without requiring an
+  // exact match. If the eps window genuinely doesn't contain the
+  // answer (a bad prediction, or target beyond every real key), falls
+  // back to scanning outward rather than silently returning a wrong
+  // answer -- correctness over speed in the rare case this triggers.
+  size_t lower_bound_index(int64_t target) const {
+    const int64_t n = static_cast<int64_t>(data_.size());
+    if (model_.segments.empty() || n == 0) return static_cast<size_t>(n);
+    const int64_t predicted = predict(target);
+    const int64_t lo = std::clamp<int64_t>(predicted - eps_, 0, n - 1);
+    const int64_t hi = std::clamp<int64_t>(predicted + eps_, 0, n - 1);
+    for (int64_t idx = lo; idx <= hi; idx++) {
+      if (data_[idx] != EMPTY_SLOT && data_[idx] >= target) return static_cast<size_t>(idx);
+    }
+    for (int64_t idx = hi + 1; idx < n; idx++) {
+      if (data_[idx] != EMPTY_SLOT && data_[idx] >= target) return static_cast<size_t>(idx);
+    }
+    return static_cast<size_t>(n);
+  }
+
+  // All real keys in [lo, hi], inclusive, in sorted order. Correctness
+  // comes from checking the actual stored key values against the
+  // bounds -- the model only helps find where to *start* scanning.
+  std::vector<int64_t> range_scan_keys(int64_t lo, int64_t hi) const {
+    std::vector<int64_t> results;
+    size_t idx = lower_bound_index(lo);
+    const size_t n = data_.size();
+    while (idx < n) {
+      if (data_[idx] != EMPTY_SLOT) {
+        if (data_[idx] > hi) break;  // a real key past the range: stop here
+        results.push_back(data_[idx]);
+      }
+      idx++;  // a gap: skip it and keep going, don't stop the scan
+    }
+    return results;
   }
 
   // Inserts key in sorted order. Tries a nearby gap first; falls back

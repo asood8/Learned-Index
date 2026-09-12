@@ -41,8 +41,10 @@ struct Token {
 // against plain string literals without normalizing every time.
 inline bool is_keyword(const std::string& upper) {
   static const std::vector<std::string> kKeywords = {
-      "CREATE", "TABLE",  "INSERT", "INTO", "VALUES", "SELECT", "FROM",
-      "WHERE",  "AND",    "BETWEEN", "INT",  "TEXT"};
+      "CREATE", "TABLE",  "INSERT", "INTO",   "VALUES", "SELECT", "FROM",
+      "WHERE",  "AND",    "BETWEEN", "INT",   "TEXT",   "EXPLAIN",
+      "UPDATE", "SET",    "DELETE", "ORDER",  "BY",     "ASC",
+      "DESC",   "LIMIT",  "COUNT",  "SUM"};
   for (const auto& kw : kKeywords) {
     if (upper == kw) return true;
   }

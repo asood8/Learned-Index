@@ -5,11 +5,15 @@ An embedded SQL database whose storage engine is a learned index
 architected the same way SQLite is: a SQL front end sitting on top
 of a swappable storage engine.
 
-**Status:** Storage engine (Phases 0-7) and Phase 8 (rows/keys/catalog)
-complete; Phase 9 (SQL tokenizer + parser) done (see `README.md`,
-`python/`, `cpp/`, `results/`). CREATE TABLE, INSERT, and SELECT (with
-=, <, >, <=, >=, BETWEEN) all parse into a clean AST; 20/20 tests
-passing, including that malformed input actually throws.
+**Status: ALL PHASES COMPLETE (0–12).** The full roadmap is done — a
+learned-index storage engine (Phases 0–7: segmentation, inserts,
+durability, cooperating learned layers, full benchmarking against the
+real PGM-index) underneath a real SQL front end (Phases 8–12: rows/
+catalog, parser, executor, REPL, EXPLAIN). See `README.md` for the
+complete phase-by-phase writeup, `python/` and `cpp/` for all source,
+`results/` for real benchmark data. Only the optional stretch goals
+and a public writeup remain, and neither is required for this project
+to be finished.
 
 ---
 
@@ -162,31 +166,51 @@ supported. Tested against every statement shape plus case-
 insensitivity, whitespace, negative literals, and that malformed
 input actually throws: 20/20 passing. *(~330 lines, done)*
 
-### Phase 10 — Query executor
-Where everything above gets used. Route each query to the cheapest
-path the storage engine supports:
-- `WHERE id = 42` → one learned-index point lookup (Phase 1/2).
-- `WHERE id BETWEEN x AND y` → range scan via linked leaves.
-- Anything else, or no `WHERE` → full sequential scan (the
-  intentional slow path, same as any database without a secondary
-  index on that column).
+### Phase 10 — Query executor ✅ done
+Routes each query to the cheapest path the storage engine actually
+supports: `WHERE id = 42` → point lookup; `WHERE id BETWEEN a AND b`
+→ range scan (via a new `GappedArray::range_scan_keys`, not "linked
+leaves" as originally sketched — the SQL layer sits on the Phase 3
+gapped array, not the Phase 0 B+-tree); anything else, or no `WHERE`,
+→ full scan with in-memory filtering. Full scan and BETWEEN turned
+out to be the same operation with different bounds, sharing one
+`range_scan` primitive. Found and fixed a real bug: the scan loop
+stopped dead at the first gap slot it hit (gaps read as `EMPTY_SLOT` =
+`INT64_MAX`, always exceeding any real bound), undercounting a
+1000-row scan down to 2 rows — guaranteed to trigger constantly given
+gaps are ~30% of the array by design. 14/14 tests passing against
+real end-to-end query results; Phases 4 and 9's suites re-verified
+unaffected. *(~230 lines, done)*
 
-*(~150–250 lines)*
-
-### Phase 11 — REPL
+### Phase 11 — REPL ✅ done
 Read a line, parse it, execute it, print the result, loop — a tiny
-`sqlite3`-style command line. The single highest payoff-per-line item
-in the project: the difference between a benchmark script and someone
-typing `SELECT * FROM users WHERE id = 42;` and watching it return.
-*(~80–120 lines)*
+`sqlite3`-style command line, backed by a real WAL file so closing
+and reopening it is a genuine restart. Verified directly: closing the
+REPL and starting a completely separate process against the same file
+correctly recovers every table and row. Each result is tagged with
+its real access method (`[point lookup]`, `[range scan]`, etc.) —
+Phase 10's routing decision, made visible. No new bugs surfaced; by
+this point nearly everything being wired together had already been
+tested individually across nine earlier phases. *(~110 lines, done)*
 
-### Phase 12 — `EXPLAIN`
-Since the executor already knows which path it took, print it:
-`EXPLAIN SELECT ...` → "point lookup via learned index, predicted
-position 4,812, corrected in 2 probes." Makes the AI part visible
-instead of buried three layers down. *(~40–60 lines)*
+### Phase 12 — `EXPLAIN` ✅ done
+A diagnostic-only twin of `search()` (`search_explain`) tracks the
+model's real predicted position and actual probe count without ever
+touching the real query path's performance. Scoped to `SELECT` only —
+a `Statement` containing itself inside its own `std::variant` needs
+pointer indirection to compile, and real routing only happens for
+`SELECT` anyway. Closer to `EXPLAIN ANALYZE` (executes and reports
+real statistics) than bare `EXPLAIN` (a hypothetical plan) — a better
+fit for a project built on real measurements throughout. 22/22 tests
+passing. *(~70 lines, done)*
 
 ---
+
+## ALL PHASES COMPLETE (0–12)
+
+The full roadmap is done: a learned-index storage engine underneath a
+real SQL front end, both proven with real tests and real benchmarks
+at every step. Everything below is optional.
 
 ## Stretch goals (roughly in order of payoff)
 - `UPDATE` / `DELETE` — mechanically similar to `INSERT`, reuses the

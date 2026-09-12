@@ -483,8 +483,195 @@ integer literals, and — just as important — that genuinely malformed
 input (a misspelled keyword, a missing value) actually throws instead
 of silently producing a wrong parse. **20/20 tests passing.**
 
-## Next: Phase 10
+## Phase 10 — the query executor
 
-The query executor — where a parsed `SELECT` actually gets routed to
-a point lookup, a range scan, or a full table scan against the
-storage engine built in Parts 1 and Phase 8.
+`cpp/executor.h` walks the AST from Phase 9 and routes each query to
+the cheapest path the storage engine actually supports:
+
+- `WHERE <primary key> = v` → one point lookup (`store_.get`) — the
+  exact mechanism from Phase 1/2/3, now driven by a query someone typed.
+- `WHERE <primary key> BETWEEN a AND b` → a real range scan.
+- Anything else, or no `WHERE` at all → a full table scan, filtering
+  each row in memory when there's a `WHERE` on a non-key column.
+
+The first column in a table's schema is always treated as the primary
+key — this project's `CREATE TABLE` grammar has no explicit
+`PRIMARY KEY` syntax, so that's a stated simplification, not an
+accident. A full table scan and a `BETWEEN` range scan turned out to
+be the exact same underlying operation with different bounds, so both
+go through one shared `range_scan` primitive on `DurableStore`.
+
+**A real bug, found the moment everything got wired together for
+real**: the first test run returned 1 row for `WHERE id BETWEEN 100
+AND 110` instead of 11, and a full table scan returned 2 rows instead
+of 1000. The cause: `range_scan_keys`'s loop condition checked
+`data_[idx] <= hi` on *every* slot, including gaps — and since a gap
+holds `EMPTY_SLOT` (`INT64_MAX`), which is always greater than any
+real bound, the scan stopped dead at the very first gap it hit. Given
+gaps make up ~30% of the array by design (the entire point of Phase
+3), this bug was guaranteed to trigger constantly, not as an edge
+case. Fixed by separating "skip this slot" (a gap) from "stop the
+scan" (a real key past the bound) — gaps get skipped and the scan
+continues; only an actual key beyond the range stops it.
+
+**Tested against real data end-to-end**: a 1,000-row table, checking
+not just that each access method gets chosen correctly but that the
+*actual returned rows* are correct — point lookup returns the exact
+row, the range scan returns exactly the 11 rows it should in sorted
+order, the filtered scan returns exactly the rows matching the
+predicate, and the full scan returns all 1,000. **14/14 tests
+passing.** Confirmed the fix didn't regress Phase 4's 19 tests or
+Phase 9's 20.
+
+## Phase 11 — the REPL
+
+`cpp/repl.cpp` is the payoff for every phase before it: read a line,
+parse it, execute it, print the result, loop — the same shape as
+`sqlite3`'s own command line. The database is backed by a real WAL
+file on disk, so closing and reopening the REPL is a genuine restart
+using the exact durability machinery proven back in Phase 5/8, not a
+simulation of one.
+
+A real session, piped in as a demonstration:
+
+```
+db> CREATE TABLE users (id INT, name TEXT, age INT);
+OK
+db> INSERT INTO users VALUES (1, 'Alice', 30);
+OK
+db> SELECT * FROM users WHERE id = 2;
+id  name  age
+--  ----  ---
+2   Bob   25
+(1 row) [point lookup]
+db> SELECT * FROM users WHERE id BETWEEN 1 AND 2;
+(2 rows) [range scan]
+db> SELECT * FRUM users;
+Parse error: expected keyword FROM, got 'FRUM'
+db> .tables
+users
+db> .exit
+bye.
+```
+
+That `[point lookup]` / `[range scan]` tag after each result isn't
+decoration — it's the executor's real routing decision from Phase 10,
+made visible. A malformed query prints a clean error and the session
+keeps going, rather than crashing. **Verified the persistence claim
+directly, not just assumed it**: closing the REPL entirely and
+starting a completely separate process against the same WAL file
+recovers all 3 rows and the `users` table itself, correctly.
+
+No new bugs surfaced this phase — by this point nearly every piece
+being wired together (parser, executor, catalog, durability) had
+already been individually tested through nine earlier phases, so a
+thin CLI layer on top had little new surface area left to hide a bug in.
+
+## Phase 12 — EXPLAIN
+
+The last phase on the roadmap, and the one that makes the AI part
+visible instead of buried three layers down. `GappedArray::search_explain`
+is a diagnostic-only twin of the real `search()` — same logic, but it
+also tracks the model's raw predicted position and how many slots the
+local search actually examined, kept entirely separate so this
+instrumentation never costs anything on the real query path. `EXPLAIN`
+is scoped to `SELECT` only in the grammar — a deliberate simplification
+that avoids a genuinely awkward C++ problem (a `Statement` containing
+itself inside a `std::variant` needs pointer indirection to even
+compile), and real access-method routing only happens for `SELECT`
+anyway.
+
+A real session:
+
+```
+db> EXPLAIN SELECT * FROM users WHERE id = 2;
+point lookup via learned index -- predicted position 2, corrected in 4 probes, key found
+db> EXPLAIN SELECT * FROM users WHERE id = 999;
+point lookup via learned index -- predicted position 2, corrected in 5 probes, key not found
+db> EXPLAIN SELECT * FROM users WHERE id BETWEEN 1 AND 3;
+range scan over the gapped array -- returned 3 row(s)
+db> EXPLAIN SELECT * FROM users WHERE age = 30;
+full table scan, no index used -- filtered down to 1 matching row(s)
+db> EXPLAIN INSERT INTO users VALUES (4, 'x', 1);
+Parse error: EXPLAIN is only supported for SELECT statements
+```
+
+That "predicted position 2, corrected in 4 probes" line is the actual
+model prediction and actual local-search cost from a real query, not
+a canned string — this is closer to a real database's `EXPLAIN
+ANALYZE` (which executes and reports real statistics) than bare
+`EXPLAIN` (which only shows a hypothetical plan), and that fits this
+project's whole identity better: real measurements over theoretical
+claims, the same standard every phase before this was held to.
+**22/22 tests passing**, including that a missing key correctly
+reports "not found" with real diagnostics rather than just succeeding
+silently, and that `EXPLAIN` on a non-`SELECT` statement is rejected
+rather than silently ignored.
+
+# The roadmap is complete
+
+Phases 0 through 12 are all done: a learned-index storage engine
+(segmentation, gaps, durability, real adversarial testing) underneath
+a real SQL front end (parser, executor, REPL, EXPLAIN). Everything
+below is optional stretch work, done on top of that finished base.
+
+# Stretch goals
+
+## UPDATE / DELETE (and a real bug from Phase 2/3, finally caught)
+
+`UPDATE table SET col = val [, ...] [WHERE ...]` and
+`DELETE FROM table [WHERE ...]` are both implemented, sharing routing
+logic with `SELECT` via a new `find_matches` helper (same point-lookup
+/ range-scan / full-scan dispatch, just returning storage keys
+alongside rows so they can be re-put or removed).
+
+- **`DELETE` needed a real WAL format change.** A plain "key, no
+  value" record is indistinguishable from a genuinely empty value, so
+  every record now carries an explicit one-byte type tag (`PUT` or
+  `DELETE`) ahead of the key. `GappedArray::remove()` just turns a
+  slot back into a gap — reusing the exact concept that made inserts
+  cheap in the first place, not a new "tombstone" mechanism.
+- **`UPDATE` handles primary-key reassignment properly**, not just
+  ordinary column changes: if the first column (the primary key) is
+  itself being set, the row's storage key has to move — the old key
+  is removed and the new one is put, rather than silently corrupting
+  the index.
+
+**Testing `UPDATE ... SET id = 5000` surfaced a real,
+previously-undiscovered bug that had been sitting in `search()` since
+Phase 2/3.** The original `search()` clamped its search window with
+separate `std::max`/`std::min` calls — the exact same bug independently
+found and fixed in `insert()` back in Phase 5, and in
+`lower_bound_index()` in Phase 10, but never backported to `search()`
+itself. When a prediction extrapolates far enough beyond the array
+(reassigning a primary key to a much larger, previously-unused value
+is exactly this case), clamping each bound against a different limit
+independently can produce `lo > hi`, silently emptying the search
+window instead of narrowing it — the row was genuinely present
+(confirmed via `range_scan`), but `search()` looked in an empty
+window and reported "not found." It had gone undetected for ten
+phases because ordinary queries never extrapolated far enough to
+trigger it — even the earlier "search for a nonexistent key" `EXPLAIN`
+test happened to get the right answer for the wrong reason, since an
+empty window's default "not found" coincidentally matched what a
+genuinely-absent key should report anyway. Fixed by applying the same
+`std::clamp` treatment already proven correct elsewhere. **All 48
+executor tests now pass**, including that a deletion and a
+primary-key reassignment both survive a real restart, not just the
+current session.
+
+## ORDER BY, LIMIT, and aggregates
+
+`SELECT` now supports `ORDER BY col [ASC|DESC]`, `LIMIT n`, and two
+aggregates, `COUNT(*)` and `SUM(col)`. All three are post-processing
+steps applied uniformly after rows are collected — regardless of
+which access method found them — so a point lookup, a range scan, and
+a full scan all support the same clauses without duplicated logic:
+sort first, then truncate to the limit, then (if the query was an
+aggregate) collapse the remaining rows into a single summary row.
+`SUM` correctly rejects a TEXT column rather than silently returning
+garbage. **All 48 executor tests pass**, including that `ORDER BY`
+and `LIMIT` compose correctly together (limiting applies *after*
+sorting, not before — a `LIMIT 3` on a descending sort returns the 3
+largest values, not an arbitrary 3 followed by a sort that never
+mattered).

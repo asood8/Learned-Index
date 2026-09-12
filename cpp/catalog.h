@@ -63,6 +63,12 @@ class Catalog {
 
   size_t table_count() const { return id_to_schema_.size(); }
 
+  std::vector<std::string> table_names() const {
+    std::vector<std::string> names;
+    for (const auto& [name, id] : name_to_id_) names.push_back(name);
+    return names;
+  }
+
  private:
   DurableStore& store_;
   int32_t next_table_id_ = 1;  // 0 is reserved for the catalog itself
@@ -82,11 +88,12 @@ class Catalog {
   }
 
   void load_existing(const std::string& wal_path) {
-    for (auto& [key, value] : WriteAheadLog::replay(wal_path)) {
-      if (unpack_table_id(key) != CATALOG_TABLE_ID) continue;
-      const int32_t table_id = static_cast<int32_t>(unpack_primary_key(key));
+    for (const WalRecord& rec : WriteAheadLog::replay(wal_path)) {
+      if (rec.type != WalRecordType::PUT) continue;  // a catalog row is never deleted via the SQL interface
+      if (unpack_table_id(rec.key) != CATALOG_TABLE_ID) continue;
+      const int32_t table_id = static_cast<int32_t>(unpack_primary_key(rec.key));
 
-      std::vector<Value> row = decode_row(value);
+      std::vector<Value> row = decode_row(rec.value);
       TableSchema schema;
       schema.table_id = table_id;
       schema.name = row[0].text_val;
