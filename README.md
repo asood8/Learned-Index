@@ -461,7 +461,30 @@ everything and rebuilds both the catalog and the store from the same
 WAL file. Result: both schemas and all 150 rows decode back correctly
 — verified directly, not assumed.
 
-## Next: Phase 9
+## Phase 9 — SQL tokenizer and parser
 
-The SQL tokenizer and parser — turning raw text into something the
-executor (Phase 10) can act on.
+`cpp/sql_tokenizer.h` splits raw text into keywords, identifiers,
+literals, and punctuation. `cpp/sql_ast.h` defines three small AST
+types (`CreateTableStmt`, `InsertStmt`, `SelectStmt`), held in a
+`std::variant`. `cpp/sql_parser.h` is a straightforward recursive-descent
+parser over that token stream — the same technique as writing a
+calculator/expression parser, just with a few more statement shapes.
+
+**Grammar supported**: `CREATE TABLE t (col TYPE, ...)`,
+`INSERT INTO t VALUES (...)`, and `SELECT * FROM t [WHERE col op val]`
+where `op` is `=`, `<`, `>`, `<=`, `>=`, or `BETWEEN ... AND ...`.
+Keywords are case-insensitive; whitespace is irrelevant, matching
+normal SQL conventions.
+
+**Tested against the whole grammar, not just the happy path**:
+`cpp/sql_parser_test.cpp` checks every statement shape's AST fields
+directly, plus case-insensitivity, irregular whitespace, negative
+integer literals, and — just as important — that genuinely malformed
+input (a misspelled keyword, a missing value) actually throws instead
+of silently producing a wrong parse. **20/20 tests passing.**
+
+## Next: Phase 10
+
+The query executor — where a parsed `SELECT` actually gets routed to
+a point lookup, a range scan, or a full table scan against the
+storage engine built in Parts 1 and Phase 8.

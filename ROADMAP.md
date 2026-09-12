@@ -5,11 +5,11 @@ An embedded SQL database whose storage engine is a learned index
 architected the same way SQLite is: a SQL front end sitting on top
 of a swappable storage engine.
 
-**Status:** Storage engine (Phases 0-7) complete; Phase 8 (rows, keys,
-catalog) done (see `README.md`, `python/`, `cpp/`, `results/`). Had to
-extend the WAL/DurableStore to support real values first (it only
-tracked key existence before). Two tables, 150 rows total, survive a
-real simulated restart with correct decoding, catalog included.
+**Status:** Storage engine (Phases 0-7) and Phase 8 (rows/keys/catalog)
+complete; Phase 9 (SQL tokenizer + parser) done (see `README.md`,
+`python/`, `cpp/`, `results/`). CREATE TABLE, INSERT, and SELECT (with
+=, <, >, <=, >=, BETWEEN) all parse into a clean AST; 20/20 tests
+passing, including that malformed input actually throws.
 
 ---
 
@@ -153,12 +153,14 @@ WAL replay pass rather than a range query, since `DurableStore` only
 supports point lookups until Phase 10. Proven with a real restart:
 2 tables, 150 rows, all correctly recovered. *(~280 lines, done)*
 
-### Phase 9 — SQL tokenizer + parser
-A tokenizer (keywords/identifiers/literals/punctuation), then a
-recursive-descent parser producing a small AST. Keep the grammar
-small and real: `CREATE TABLE`, `INSERT INTO ... VALUES (...)`,
-`SELECT * FROM ... WHERE col = / < / > / BETWEEN ...`.
-*(~250–350 lines)*
+### Phase 9 — SQL tokenizer + parser ✅ done
+Tokenizer (keywords/identifiers/literals/punctuation) plus a
+recursive-descent parser producing a `std::variant` AST across three
+statement kinds. `CREATE TABLE`, `INSERT INTO ... VALUES (...)`, and
+`SELECT * FROM ... WHERE col =/</>/<=/>=  or BETWEEN ... AND ...` all
+supported. Tested against every statement shape plus case-
+insensitivity, whitespace, negative literals, and that malformed
+input actually throws: 20/20 passing. *(~330 lines, done)*
 
 ### Phase 10 — Query executor
 Where everything above gets used. Route each query to the cheapest
