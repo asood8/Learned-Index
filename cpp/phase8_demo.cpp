@@ -14,13 +14,13 @@
 
 int main() {
   const std::string wal_path = "results/phase8_demo.wal";
-  std::remove(wal_path.c_str());
+  DurableStore::destroy(wal_path);
 
   int32_t users_id, products_id;
 
   {
     DurableStore store(wal_path, 0.7, 64);
-    Catalog catalog(store, wal_path);
+    Catalog catalog(store);
 
     users_id = catalog.create_table("users", {{"id", ColumnType::INT64},
                                                {"name", ColumnType::TEXT},
@@ -54,7 +54,7 @@ int main() {
   std::printf("\n-- simulated restart: rebuilding store AND catalog from the same WAL --\n");
   {
     DurableStore store(wal_path, 0.7, 64);
-    Catalog catalog(store, wal_path);
+    Catalog catalog(store);
 
     bool ok = true;
     if (catalog.table_count() != 2) {

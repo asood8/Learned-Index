@@ -1,5 +1,7 @@
 # Learned Index DB
 
+[![tests](https://github.com/asood8/Learned-Index/actions/workflows/tests.yml/badge.svg)](https://github.com/asood8/Learned-Index/actions/workflows/tests.yml)
+
 A small embedded SQL database in C++17 whose storage engine is a
 learned index instead of a B-tree. To find a key, it evaluates a
 piecewise-linear model that predicts where the key sits in a sorted
@@ -29,27 +31,24 @@ The section in parentheses has the details.
 
 ## Building and running
 
-There's no build system. Each program is one file, compiled directly:
+Every program is a single `.cpp` file under `cpp/`, built with g++
+(C++17). The Makefile wraps the common tasks and puts binaries in
+`build/`:
 
 ```bash
-mkdir -p results
-python3 python/data_gen.py --n 1000000 --outdir data   # benchmark datasets, needs numpy
-
-# tests
-g++ -O2 -std=c++17 -o cpp/test_suite cpp/test_suite.cpp && ./cpp/test_suite
-g++ -O2 -std=c++17 -o cpp/sql_parser_test cpp/sql_parser_test.cpp && ./cpp/sql_parser_test
-g++ -O2 -std=c++17 -o cpp/executor_test cpp/executor_test.cpp && ./cpp/executor_test
-
-# the SQL shell
-g++ -O2 -std=c++17 -o cpp/repl cpp/repl.cpp && ./cpp/repl
-
-# differential test against SQLite (Python standard library only)
-g++ -O2 -std=c++17 -o cpp/sql_harness cpp/sql_harness.cpp
-python3 python/sqlite_diff_test.py --runs 200
+make test        # build and run the three test suites
+make asan        # the same suites under AddressSanitizer and UBSan
+make difftest    # compare against SQLite (Python standard library only)
+make demos       # the durability and catalog restart demos
+make repl        # build and start the SQL shell
+make data        # generate the benchmark datasets (needs numpy)
+make all         # build everything, benchmarks included
 ```
 
-The benchmarks build the same way, and each section below names the
-one it used.
+The benchmarks are run by hand, since most of them take a dataset
+path, and each section below names the one it used. The write-ahead
+log uses POSIX calls like `fsync` and `ftruncate`, so this builds on
+Linux, or on Windows through WSL.
 
 The rest of this file is a build log, written phase by phase as the
 project grew. Each section records what was built, what broke, and
@@ -939,10 +938,12 @@ append can't leave half a record behind either.
 All five checks pass now, along with the other suites, and the
 durability demos still recover all of their data. Logs written by the
 old code can't be read by the new one; there were no real databases
-around to migrate, so I didn't write a converter. One gap is still
-open: after a new log file is created, its parent directory isn't
-fsync'd, which some filesystems need before the file itself is
-guaranteed to survive a crash.
+around to migrate, so I didn't write a converter. This version also
+left one gap: after a new log file was created, its parent directory
+wasn't fsync'd, which some filesystems need before the file itself is
+guaranteed to survive a crash. That got fixed along with
+checkpointing, which needed the same thing for renaming a snapshot
+into place.
 
 ## Differential testing against SQLite
 
@@ -1006,11 +1007,10 @@ new checks fail on the old executor and pass on the new one. After the
 fixes, 200 runs of 300 statements each, with nothing skipped, found no
 disagreements, and neither did 50 longer runs of 1,000 statements.
 
-The tester has limits of its own. It stays inside the documented key
-limits, so it never tries negative primary keys or indexed values of
-2^20 and up. Reading the code, values like that aren't rejected on the
-way in; the key packing just masks them. I haven't tested what that
-does to query results yet.
+At first the tester stayed inside the documented key limits, because
+the database didn't enforce them: values outside them were masked by
+the key packing instead of rejected. That's fixed now (see "Input
+validation" below), and the tester generates those statements too.
 
 ## Rows stored in the learned index
 
@@ -1112,3 +1112,119 @@ once and read many times. These timings came from a laptop with a lot
 running in the background, so treat them as rough, although the ratios
 held up across repeated runs. Lookup times for the optimal model are
 part of the benchmark reruns.
+
+## Input validation
+
+The differential tester was originally kept inside the documented key
+limits because the database didn't enforce them. Only the primary
+key's type was checked. An `INSERT` or `UPDATE` could put a string
+into an `INT` column. A negative primary key, or an indexed value of
+2^20 or more, was masked by the key packing into some other key
+instead of being refused. A `WHERE` on a column that doesn't exist
+quietly matched nothing.
+
+Some of that produced wrong answers, not just bad data. With an index
+on `age`, `WHERE age = 1048621` (that's 2^20 + 45) came back with all
+the age-45 rows, because the index lookup masked the value down to 45.
+`WHERE id BETWEEN -5 AND 3` came back empty, because the negative
+bound got packed into a huge key.
+
+`executor.h` now checks every value against its column before anything
+is written:
+
+- a value's type has to match its column's type;
+- a primary key has to be between 0 and 2^48 − 1, or 2^28 − 1 on a
+  table with a secondary index, since index entries pack the primary
+  key into 28 bits;
+- a value in an indexed column has to be between 0 and 2^20 − 1;
+- a `WHERE` has to name a real column and compare it with a literal of
+  the same type;
+- `CREATE INDEX` refuses a table whose existing rows don't fit those
+  limits, and checks before building anything;
+- `CREATE TABLE` requires the first column, the primary key, to be
+  `INT`, and column names to be unique.
+
+Queries whose bounds fall outside the representable range are still
+fine, since there's nothing wrong with asking. Range scans clamp their
+bounds, and an out-of-range value simply matches nothing.
+
+There are 13 new checks for this in `executor_test.cpp`, and 12 of
+them fail on the previous executor. The thirteenth checks that a large
+primary key is still accepted where it's legal. The differential
+tester now generates these statements as well. It carries a small copy
+of the rules, and for a statement that breaks one, it expects an error
+and an unchanged database, and doesn't send it to SQLite. With those
+statements and checkpoints mixed in, 200 runs of 300 statements and 50
+runs of 1,000 found no disagreements.
+
+## Checkpointing
+
+Before this, the write-ahead log only grew. Every startup replayed
+every write ever made, so a store whose rows kept getting updated got
+slower to open even though it wasn't getting any bigger.
+
+`DurableStore::checkpoint()` now writes the whole store to a snapshot
+file, in key order with a CRC-32 over it, and then empties the log. On
+startup the snapshot is loaded in one pass, which lays the gapped
+array out directly instead of inserting keys one at a time, and then
+anything logged since is replayed on top. A checkpoint also happens
+automatically every 100,000 writes by default, and the REPL has a
+`.checkpoint` command. The automatic one makes that one write slow,
+since it rewrites the whole store. A production database would do the
+work in the background.
+
+The order of the steps is what makes it safe to crash at any point.
+The snapshot is written to a temporary file, fsync'd, and only then
+renamed over the old one, followed by an fsync of the directory. The
+log is emptied only after that. A crash while the snapshot is being
+written leaves the old snapshot and the full log, which together are
+still complete. A crash after the rename but before the log is emptied
+leaves the new snapshot plus a log of writes it already contains.
+Replaying those on top of it lands in the same state, because each key
+ends up with whatever its last logged write said. A snapshot that
+fails its checksum is refused rather than skipped, because skipping it
+would silently lose everything the emptied log no longer has.
+
+This forced one change elsewhere. The catalog used to rebuild itself on
+startup by reading the log directly, a workaround from before range
+scans existed. Once checkpoints started emptying the log, a restart
+after a checkpoint would have come back with no tables at all. It now
+range-scans its own rows out of the store instead.
+
+The tests go through each of those crash points: a checkpoint followed
+by more writes, a crash between the rename and emptying the log, a
+leftover half-written temporary snapshot, a damaged snapshot,
+automatic checkpoints, and the catalog and its indexes coming back
+after a checkpoint. The differential tester also checkpoints
+automatically every 25 writes and asks for extra checkpoints at
+random.
+
+`cpp/checkpoint_demo.cpp` measures what it does for startup. It writes
+2,000 rows 10 times each, 20,000 fsync'd writes in all, and then opens
+the store from the full log, and again after a checkpoint:
+
+| | on disk | opening the store (median of 5) |
+|---|---|---|
+| before the checkpoint | 1,508,908-byte log | 9.78 ms, replaying 20,000 records |
+| after the checkpoint | 140,910-byte snapshot, empty log | 0.49 ms, loading 2,000 rows |
+
+Opening got about 20x faster, and every row came back with its latest
+value both times. A second run gave 10.74 ms against 0.46 ms. The gap
+depends on how many updates have piled up, since the log grows with
+every write while the snapshot stays the size of the data. One thing I
+learned running it: WSL's `/tmp` is a tmpfs, where fsync does nothing,
+so building the store there took almost no time. On the ext4 home
+directory it took 39.8 s, about 2 ms per fsync.
+
+## Building with make, and CI
+
+The project has a `Makefile` now, so building and testing is a few
+short commands (listed near the top of this file), and binaries go in
+`build/` instead of next to the source. A GitHub Actions workflow in
+`.github/workflows/tests.yml` runs on every push. It builds every
+program, runs the three test suites normally and again under
+AddressSanitizer and UBSan, runs the durability demos, and does 30
+runs of the SQLite differential test. The badge at the top of this
+file shows how the latest run went. CI doesn't run the benchmarks,
+since timings from shared machines would be too noisy to mean
+anything.

@@ -1,0 +1,26 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build every program
+        run: make -j4 all
+
+      - name: Test suites
+        run: make test
+
+      - name: Test suites under AddressSanitizer and UBSan
+        run: make -j4 asan
+
+      - name: Durability demos
+        run: make demos
+
+      - name: Differential test against SQLite
+        run: make difftest RUNS=30

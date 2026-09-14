@@ -28,10 +28,10 @@ void check(bool condition, const std::string& name) {
 
 int main() {
   const std::string wal_path = "results/phase10_demo.wal";
-  std::remove(wal_path.c_str());
+  DurableStore::destroy(wal_path);
 
   DurableStore store(wal_path, 0.7, 64);
-  Catalog catalog(store, wal_path);
+  Catalog catalog(store);
   Executor exec(store, catalog);
 
   auto run = [&](const std::string& sql) { return exec.execute(parse_sql(sql)); };
@@ -196,7 +196,7 @@ int main() {
   }
   {
     DurableStore restarted(wal_path, 0.7, 64);
-    Catalog restarted_catalog(restarted, wal_path);
+    Catalog restarted_catalog(restarted);
     Executor restarted_exec(restarted, restarted_catalog);
     auto res = restarted_exec.execute(parse_sql("SELECT * FROM users WHERE id = 2;"));
     check(res.rows.empty(), "a deletion survives a full restart, not just the current session");
@@ -366,14 +366,62 @@ int main() {
           "UPDATE onto another row's primary key removes that row's index entries");
   }
 
+  // Input validation: values the key packing can't represent, and type
+  // mismatches, are refused instead of being masked or compared as 0.
+  {
+    check(!run("INSERT INTO users VALUES (7101, 'x', 'not a number');").success,
+          "a TEXT value for an INT column is rejected");
+    check(!run("INSERT INTO users VALUES (-1, 'x', 30);").success, "a negative primary key is rejected");
+    check(!run("INSERT INTO users VALUES (7102, 'x', 1048576);").success,
+          "an indexed value of 2^20 or more is rejected");
+    check(!run("INSERT INTO users VALUES (300000000, 'x', 30);").success,
+          "a primary key over 28 bits is rejected on a table with an index");
+    check(!run("UPDATE users SET age = 'old' WHERE id = 2;").success, "UPDATE with the wrong type is rejected");
+    check(!run("SELECT * FROM users WHERE age = 'x';").success, "WHERE comparing an INT column with TEXT is rejected");
+    check(!run("SELECT * FROM users WHERE nope = 1;").success,
+          "WHERE on a column that doesn't exist is an error, not zero rows");
+    check(!run("CREATE TABLE bad (name TEXT, id INT);").success, "a table whose first column isn't INT is rejected");
+    check(!run("CREATE TABLE bad2 (id INT, id INT);").success, "duplicate column names are rejected");
+
+    const size_t low_ids = run("SELECT * FROM users WHERE id <= 3;").rows.size();
+    auto between = run("SELECT * FROM users WHERE id BETWEEN -5 AND 3;");
+    check(between.success && low_ids > 0 && between.rows.size() == low_ids,
+          "BETWEEN with a negative lower bound still finds the rows above it");
+    // 2^20 + 45 masks down to 45, which the index has plenty of
+    auto masked = run("SELECT * FROM users WHERE age = 1048621;");
+    check(masked.success && masked.rows.empty(), "an out-of-range value in WHERE on an indexed column matches nothing");
+
+    run("CREATE TABLE wide (id INT, v INT);");
+    check(run("INSERT INTO wide VALUES (300000000, 1);").success,
+          "a primary key over 28 bits is fine on a table without an index");
+    check(!run("CREATE INDEX idx_wide_v ON wide(v);").success,
+          "CREATE INDEX then refuses that table instead of masking the key");
+  }
+
   // durability: the index itself has to survive a restart, not just
   // the base table
   {
     DurableStore restarted(wal_path, 0.7, 64);
-    Catalog restarted_catalog(restarted, wal_path);
+    Catalog restarted_catalog(restarted);
     Executor restarted_exec(restarted, restarted_catalog);
     auto res = restarted_exec.execute(parse_sql("SELECT * FROM users WHERE age = 45;"));
     check(res.access_method == "secondary index lookup", "the secondary index itself survives a restart");
+  }
+
+  // A checkpoint empties the log, so tables, indexes, and rows all have
+  // to come back from the snapshot.
+  {
+    const size_t rows_before = run("SELECT * FROM users;").rows.size();
+    store.checkpoint();
+    DurableStore restarted(wal_path, 0.7, 64);
+    Catalog restarted_catalog(restarted);
+    Executor restarted_exec(restarted, restarted_catalog);
+    auto all = restarted_exec.execute(parse_sql("SELECT * FROM users;"));
+    auto by_age = restarted_exec.execute(parse_sql("SELECT * FROM users WHERE age = 45;"));
+    check(restarted.snapshot_entries() > 0 && all.rows.size() == rows_before,
+          "after a checkpoint, every row comes back from the snapshot");
+    check(by_age.access_method == "secondary index lookup" && !by_age.rows.empty(),
+          "after a checkpoint, the catalog and its index come back too");
   }
 
   // the actual point of this stretch goal: prove the speedup is real

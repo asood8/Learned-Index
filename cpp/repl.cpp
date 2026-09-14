@@ -66,10 +66,10 @@ int main(int argc, char** argv) {
   const std::string wal_path = (argc > 1) ? argv[1] : "results/repl.wal";
 
   DurableStore store(wal_path, 0.7, 64);
-  Catalog catalog(store, wal_path);
+  Catalog catalog(store);
   Executor exec(store, catalog);
 
-  std::printf("learned-index-db -- type SQL ending in ';', or .exit to quit.\n");
+  std::printf("learned-index-db -- type SQL ending in ';', .tables, .checkpoint, or .exit to quit.\n");
   std::printf("database file: %s\n\n", wal_path.c_str());
 
   std::string line;
@@ -81,6 +81,12 @@ int main(int argc, char** argv) {
     const std::string trimmed = trim(line);
     if (trimmed.empty()) continue;
     if (trimmed == ".exit" || trimmed == ".quit") break;
+
+    if (trimmed == ".checkpoint") {
+      store.checkpoint();
+      std::printf("OK (snapshot written, log emptied)\n");
+      continue;
+    }
 
     if (trimmed == ".tables") {
       auto names = catalog.table_names();

@@ -10,10 +10,15 @@
 //   ERR <message> an error or a parse error
 //
 // The line ".restart" throws away every in-memory structure and rebuilds
-// them from the write-ahead log, the same way a new process would, so
-// the differential test can check recovery too. The log file named on
-// the command line is deleted at startup.
+// them from disk, the same way a new process would, and ".checkpoint"
+// writes a snapshot and empties the log, so the differential test can
+// check recovery and checkpointing too.
+//
+// usage: sql_harness <wal-path> [checkpoint-every]
+// The store's files are deleted at startup. checkpoint-every sets how
+// many writes trigger an automatic checkpoint (0 turns them off).
 #include <cstdio>
+#include <cstdlib>
 #include <iostream>
 #include <memory>
 #include <string>
@@ -44,24 +49,31 @@ struct Database {
   DurableStore store;
   Catalog catalog;
   Executor exec;
-  explicit Database(const std::string& wal_path)
-      : store(wal_path, 0.7, 64), catalog(store, wal_path), exec(store, catalog) {}
+  Database(const std::string& wal_path, size_t checkpoint_every)
+      : store(wal_path, 0.7, 64, checkpoint_every), catalog(store), exec(store, catalog) {}
 };
 
 int main(int argc, char** argv) {
   if (argc < 2) {
-    std::fprintf(stderr, "usage: %s <wal-path>\n", argv[0]);
+    std::fprintf(stderr, "usage: %s <wal-path> [checkpoint-every]\n", argv[0]);
     return 1;
   }
   const std::string wal_path = argv[1];
-  std::remove(wal_path.c_str());
-  auto db = std::make_unique<Database>(wal_path);
+  const size_t checkpoint_every = (argc > 2) ? std::strtoull(argv[2], nullptr, 10) : 100000;
+  DurableStore::destroy(wal_path);
+  auto db = std::make_unique<Database>(wal_path, checkpoint_every);
 
   std::string line;
   while (std::getline(std::cin, line)) {
     if (line == ".restart") {
       db.reset();  // close the log before reopening it
-      db = std::make_unique<Database>(wal_path);
+      db = std::make_unique<Database>(wal_path, checkpoint_every);
+      std::printf("OK\n");
+      std::fflush(stdout);
+      continue;
+    }
+    if (line == ".checkpoint") {
+      db->store.checkpoint();
       std::printf("OK\n");
       std::fflush(stdout);
       continue;

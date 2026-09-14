@@ -10,22 +10,43 @@
 // learned index optional for point lookups: get() searched it and then
 // the hash map, and the hash map could have answered on its own. Now
 // the learned index is the only place a row lives.
+//
+// Checkpoints. Without them the log only grows, and every startup
+// replays every write ever made, even for a store that isn't getting
+// bigger because the same rows keep being updated. checkpoint() writes
+// the whole store to a snapshot file (snapshot.h) and then empties the
+// log, and startup loads the snapshot in one pass before replaying
+// whatever the log has gathered since. One also happens automatically
+// every `checkpoint_every` writes (0 turns that off). A checkpoint
+// makes that one write slow, since it rewrites the whole store;
+// a production database would do it in the background.
 #pragma once
 
 #include <cstdint>
+#include <cstdio>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "gapped_array.h"
+#include "snapshot.h"
 #include "write_ahead_log.h"
 
 class DurableStore {
  public:
   using RowArray = BasicGappedArray<std::string>;
 
-  DurableStore(const std::string& wal_path, double density, int64_t eps)
-      : wal_(wal_path), index_(RowArray::build({}, density, eps)) {
+  DurableStore(const std::string& wal_path, double density, int64_t eps, size_t checkpoint_every = 100000)
+      : wal_(wal_path),
+        snapshot_path_(wal_path + ".snapshot"),
+        checkpoint_every_(checkpoint_every),
+        index_(RowArray::build({}, density, eps)) {
+    std::vector<int64_t> keys;
+    std::vector<std::string> values;
+    if (read_snapshot(snapshot_path_, keys, values)) {
+      snapshot_entries_ = keys.size();
+      index_ = RowArray::build(keys, std::move(values), density, eps);
+    }
     const std::vector<WalRecord> recovered = WriteAheadLog::replay(wal_path);
     for (const WalRecord& rec : recovered) {
       if (rec.type == WalRecordType::PUT) {
@@ -38,6 +59,16 @@ class DurableStore {
       }
     }
     recovered_entries_ = recovered.size();
+    writes_since_checkpoint_ = recovered.size();
+  }
+
+  // Deletes a store's files (log, snapshot, and any leftover temporary
+  // snapshot), for tests and demos that want a fresh start. Deleting
+  // only the log would leave an old snapshot behind to be loaded.
+  static void destroy(const std::string& wal_path) {
+    std::remove(wal_path.c_str());
+    std::remove((wal_path + ".snapshot").c_str());
+    std::remove((wal_path + ".snapshot.tmp").c_str());
   }
 
   // Durably stores key -> value: logged (and fsync'd) to disk first,
@@ -46,6 +77,7 @@ class DurableStore {
   void put(int64_t key, const std::string& value) {
     wal_.log_put(key, value);
     index_.insert(key, value);
+    after_write();
   }
 
   // Durably removes key: logged first (so a crash right after this
@@ -56,7 +88,22 @@ class DurableStore {
     if (!index_.search(key, idx)) return false;
     wal_.log_delete(key);
     index_.remove(key);
+    after_write();
     return true;
+  }
+
+  // Writes everything to the snapshot file, then empties the log. The
+  // order is what makes it crash-safe. The snapshot goes to a temporary
+  // file and is renamed into place only once it's complete, and the log
+  // is emptied only after that. A crash in between leaves the new
+  // snapshot plus a log of writes it already contains, and replaying
+  // those on top of it ends in the same state, since each key ends up
+  // with whatever its last logged write said.
+  void checkpoint() {
+    write_snapshot(snapshot_path_, index_.range_scan(INT64_MIN, INT64_MAX - 1));
+    wal_.reset();
+    writes_since_checkpoint_ = 0;
+    checkpoints_++;
   }
 
   bool get(int64_t key, std::string& out_value) const { return index_.get(key, out_value); }
@@ -79,10 +126,22 @@ class DurableStore {
   // delete writes an additional entry for the same key. Use size()
   // for the actual live key count.
   size_t recovered_entries() const { return recovered_entries_; }
+  size_t snapshot_entries() const { return snapshot_entries_; }  // rows loaded from a snapshot on startup
+  size_t checkpoints() const { return checkpoints_; }            // checkpoints taken by this instance
+  uint64_t log_bytes() const { return wal_.size_bytes(); }
   size_t size() const { return index_.size(); }
 
  private:
   WriteAheadLog wal_;
+  std::string snapshot_path_;
+  size_t checkpoint_every_;
   RowArray index_;
   size_t recovered_entries_ = 0;
+  size_t snapshot_entries_ = 0;
+  size_t writes_since_checkpoint_ = 0;
+  size_t checkpoints_ = 0;
+
+  void after_write() {
+    if (checkpoint_every_ > 0 && ++writes_since_checkpoint_ >= checkpoint_every_) checkpoint();
+  }
 };

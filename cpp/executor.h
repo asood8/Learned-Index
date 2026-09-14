@@ -50,8 +50,73 @@ class Executor {
   DurableStore& store_;
   Catalog& catalog_;
 
+  static QueryResult failure(std::string message) {
+    QueryResult result;
+    result.success = false;
+    result.error = std::move(message);
+    return result;
+  }
+
+  static const char* type_name(ColumnType t) { return t == ColumnType::INT64 ? "INT" : "TEXT"; }
+
+  // The largest primary key a table can hold: 48 bits normally, but only
+  // 28 once it has a secondary index, because an index entry packs the
+  // primary key into its low 28 bits (table_key.h).
+  int64_t max_primary_key(const TableSchema& schema) const {
+    return catalog_.indexes_for_table(schema.table_id).empty() ? PRIMARY_KEY_MASK : SECONDARY_PK_MASK;
+  }
+
+  // Why value `v` can't be stored in column `col`, or "" if it can.
+  // Before these checks, only the primary key's type was verified: a
+  // TEXT value could land in an INT column, and a key or indexed value
+  // outside the bits table_key.h packs it into was masked into some
+  // other key instead of being refused.
+  std::string value_error(const TableSchema& schema, int col, const Value& v) const {
+    const ColumnDef& def = schema.columns[col];
+    if (v.type != def.type) {
+      return "type mismatch for column '" + def.name + "': expected " + type_name(def.type) + ", got " +
+             type_name(v.type);
+    }
+    if (col == 0) {
+      const int64_t max = max_primary_key(schema);
+      if (v.int_val < 0 || v.int_val > max) {
+        return "primary key " + std::to_string(v.int_val) + " is out of range: it must be between 0 and " +
+               std::to_string(max) + (max == SECONDARY_PK_MASK ? " on a table with a secondary index" : "");
+      }
+    } else if (def.type == ColumnType::INT64 && catalog_.find_index_for_column(schema.table_id, col) != nullptr &&
+               (v.int_val < 0 || v.int_val > SECONDARY_VALUE_MASK)) {
+      return "value " + std::to_string(v.int_val) + " is out of range for indexed column '" + def.name +
+             "': it must be between 0 and " + std::to_string(SECONDARY_VALUE_MASK);
+    }
+    return "";
+  }
+
+  // A WHERE clause has to name a real column and compare it with a
+  // literal of the same type. Comparing an INT column with TEXT used to
+  // compare against a meaningless 0, and a column that doesn't exist
+  // used to quietly match nothing.
+  std::string where_error(const TableSchema& schema, const WhereClause& where) const {
+    const int col = find_column_index(schema, where.column);
+    if (col < 0) return "no such column: " + where.column;
+    const ColumnType want = schema.columns[col].type;
+    if (where.value.type != want || (where.op == CompareOp::BETWEEN && where.value2.type != want)) {
+      return "type mismatch in WHERE: column '" + where.column + "' is " + type_name(want);
+    }
+    return "";
+  }
+
   QueryResult execute_one(const CreateTableStmt& stmt) {
     QueryResult result;
+    // The first column is the primary key (a stated simplification), and
+    // keys are integers, so it has to be INT.
+    if (stmt.columns.empty() || stmt.columns[0].type != ColumnType::INT64) {
+      return failure("the first column is the primary key and must be INT");
+    }
+    for (size_t i = 0; i < stmt.columns.size(); i++) {
+      for (size_t j = 0; j < i; j++) {
+        if (stmt.columns[i].name == stmt.columns[j].name) return failure("duplicate column name: " + stmt.columns[i].name);
+      }
+    }
     std::vector<ColumnDef> cols;
     for (const auto& c : stmt.columns) cols.push_back({c.name, c.type});
     const int32_t id = catalog_.create_table(stmt.table_name, cols);
@@ -76,10 +141,9 @@ class Executor {
                       ", got " + std::to_string(stmt.values.size());
       return result;
     }
-    if (stmt.values[0].type != ColumnType::INT64) {
-      result.success = false;
-      result.error = "primary key (first column) must be INT";
-      return result;
+    for (size_t i = 0; i < stmt.values.size(); i++) {
+      const std::string problem = value_error(*schema, static_cast<int>(i), stmt.values[i]);
+      if (!problem.empty()) return failure(problem);
     }
 
     const int64_t primary_key = stmt.values[0].int_val;
@@ -104,6 +168,10 @@ class Executor {
       result.error = "no such table: " + stmt.table_name;
       return result;
     }
+    if (stmt.has_where) {
+      const std::string problem = where_error(*schema, stmt.where);
+      if (!problem.empty()) return failure(problem);
+    }
     const std::string& pk_col = schema->columns[0].name;
     for (const auto& col : schema->columns) result.column_names.push_back(col.name);
 
@@ -116,16 +184,25 @@ class Executor {
       }
     } else if (stmt.where.column == pk_col && stmt.where.op == CompareOp::EQ) {
       result.access_method = "point lookup";
-      const int64_t key = pack_key(schema->table_id, stmt.where.value.int_val);
+      // A key outside what pack_key can represent can't have been
+      // stored, so it can't match; packing it anyway would alias it to
+      // some other key.
+      const int64_t pk = stmt.where.value.int_val;
+      const bool representable = pk >= 0 && pk <= PRIMARY_KEY_MASK;
+      const int64_t key = pack_key(schema->table_id, pk);
       if (stmt.is_explain) {
-        GappedArray::SearchDiagnostics diag = store_.get_explain(key);
-        result.explain_text = "point lookup via learned index -- predicted position " +
-                               std::to_string(diag.predicted_position) + ", corrected in " +
-                               std::to_string(diag.probes) + (diag.probes == 1 ? " probe, " : " probes, ") +
-                               (diag.found ? "key found" : "key not found");
+        if (!representable) {
+          result.explain_text = "point lookup -- primary key out of range, key not found";
+        } else {
+          GappedArray::SearchDiagnostics diag = store_.get_explain(key);
+          result.explain_text = "point lookup via learned index -- predicted position " +
+                                 std::to_string(diag.predicted_position) + ", corrected in " +
+                                 std::to_string(diag.probes) + (diag.probes == 1 ? " probe, " : " probes, ") +
+                                 (diag.found ? "key found" : "key not found");
+        }
       }
       std::string raw;
-      if (store_.get(key, raw)) result.rows.push_back(decode_row(raw));
+      if (representable && store_.get(key, raw)) result.rows.push_back(decode_row(raw));
     } else if (stmt.where.column == pk_col && stmt.where.op == CompareOp::BETWEEN) {
       result.access_method = "range scan";
       scan_range(*schema, stmt.where.value.int_val, stmt.where.value2.int_val, nullptr, result);
@@ -133,9 +210,13 @@ class Executor {
         result.explain_text =
             "range scan over the gapped array -- returned " + std::to_string(result.rows.size()) + " row(s)";
       }
-    } else if (stmt.where.op == CompareOp::EQ &&
+    } else if (stmt.where.op == CompareOp::EQ && stmt.where.value.int_val >= 0 &&
+               stmt.where.value.int_val <= SECONDARY_VALUE_MASK &&
                catalog_.find_index_for_column(schema->table_id, find_column_index(*schema, stmt.where.column)) !=
                    nullptr) {
+      // (A value outside the index's 20 bits can't be in the index, so
+      // that case skips this branch and gets the filtered full scan
+      // below, which gives the right answer instead of a masked one.)
       // A secondary index exists on this exact column -- this is the
       // whole point of this stretch goal made real: a non-key column
       // equality lookup no longer has to fall through to a full scan.
@@ -240,11 +321,16 @@ class Executor {
       return result;
     }
     for (const auto& assign : stmt.assignments) {
-      if (find_column_index(*schema, assign.column) < 0) {
-        result.success = false;
-        result.error = "no such column: " + assign.column;
-        return result;
-      }
+      const int col = find_column_index(*schema, assign.column);
+      if (col < 0) return failure("no such column: " + assign.column);
+      // every assigned value is a literal, so it can be checked once, up
+      // front, before any row changes
+      const std::string problem = value_error(*schema, col, assign.value);
+      if (!problem.empty()) return failure(problem);
+    }
+    if (stmt.has_where) {
+      const std::string problem = where_error(*schema, stmt.where);
+      if (!problem.empty()) return failure(problem);
     }
 
     for (auto& [old_key, row] : find_matches(*schema, stmt.has_where ? &stmt.where : nullptr)) {
@@ -287,6 +373,10 @@ class Executor {
       return result;
     }
 
+    if (stmt.has_where) {
+      const std::string problem = where_error(*schema, stmt.where);
+      if (!problem.empty()) return failure(problem);
+    }
     for (auto& [key, row] : find_matches(*schema, stmt.has_where ? &stmt.where : nullptr)) {
       if (store_.remove(key)) {
         sync_indexes(*schema, unpack_primary_key(key), &row, 0, nullptr);
@@ -316,6 +406,25 @@ class Executor {
       return result;
     }
 
+    // Every existing row has to fit the index's packing: values in 20
+    // bits, primary keys in 28. Checked before the index exists, so a
+    // refusal leaves nothing half-built.
+    const std::vector<std::pair<int64_t, std::vector<Value>>> rows =
+        collect_matches(*schema, 0, PRIMARY_KEY_MASK, nullptr);
+    for (const auto& [key, row] : rows) {
+      const int64_t pk = unpack_primary_key(key);
+      if (pk > SECONDARY_PK_MASK) {
+        return failure("can't index this table: primary key " + std::to_string(pk) + " is over the " +
+                       std::to_string(SECONDARY_PK_MASK) + " limit for tables with a secondary index");
+      }
+      const int64_t v = row[col_idx].int_val;
+      if (v < 0 || v > SECONDARY_VALUE_MASK) {
+        return failure("can't index column '" + stmt.column_name + "': the row with primary key " +
+                       std::to_string(pk) + " has value " + std::to_string(v) + ", outside 0 to " +
+                       std::to_string(SECONDARY_VALUE_MASK));
+      }
+    }
+
     const int32_t storage_id = catalog_.create_index(stmt.index_name, schema->table_id, col_idx);
     if (storage_id < 0) {
       result.success = false;
@@ -331,7 +440,7 @@ class Executor {
     // which this same insert path already handles correctly), and a
     // one-time bulk operation has the luxury of sorting first.
     std::vector<std::pair<int64_t, int64_t>> composites;  // (composite_key, unused)
-    for (auto& [key, row] : collect_matches(*schema, 0, PRIMARY_KEY_MASK, nullptr)) {
+    for (const auto& [key, row] : rows) {
       const int64_t pk = unpack_primary_key(key);
       composites.emplace_back(pack_secondary_composite(row[col_idx].int_val, pk), 0);
     }
@@ -362,9 +471,10 @@ class Executor {
     if (!where) return collect_matches(schema, 0, PRIMARY_KEY_MASK, nullptr);
     if (where->column == pk_col && where->op == CompareOp::EQ) {
       std::vector<std::pair<int64_t, std::vector<Value>>> result;
-      const int64_t key = pack_key(schema.table_id, where->value.int_val);
+      const int64_t pk = where->value.int_val;
+      const int64_t key = pack_key(schema.table_id, pk);
       std::string raw;
-      if (store_.get(key, raw)) result.emplace_back(key, decode_row(raw));
+      if (pk >= 0 && pk <= PRIMARY_KEY_MASK && store_.get(key, raw)) result.emplace_back(key, decode_row(raw));
       return result;
     }
     if (where->column == pk_col && where->op == CompareOp::BETWEEN) {
@@ -376,6 +486,12 @@ class Executor {
   std::vector<std::pair<int64_t, std::vector<Value>>> collect_matches(const TableSchema& schema, int64_t lo_pk,
                                                                         int64_t hi_pk, const WhereClause* filter) {
     std::vector<std::pair<int64_t, std::vector<Value>>> results;
+    // Clamp to the keys pack_key can represent. A bound outside that
+    // range (BETWEEN -5 AND 10, say) used to be masked into some huge
+    // key, which silently turned the scan into an empty one.
+    lo_pk = std::max<int64_t>(lo_pk, 0);
+    hi_pk = std::min<int64_t>(hi_pk, PRIMARY_KEY_MASK);
+    if (lo_pk > hi_pk) return results;
     const int64_t lo = pack_key(schema.table_id, lo_pk);
     const int64_t hi = pack_key(schema.table_id, hi_pk);
     for (auto& [key, raw] : store_.range_scan(lo, hi)) {
@@ -386,7 +502,7 @@ class Executor {
     return results;
   }
 
-  int find_column_index(const TableSchema& schema, const std::string& name) {
+  int find_column_index(const TableSchema& schema, const std::string& name) const {
     for (size_t i = 0; i < schema.columns.size(); i++) {
       if (schema.columns[i].name == name) return static_cast<int>(i);
     }

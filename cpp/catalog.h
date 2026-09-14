@@ -9,16 +9,12 @@
 // (TABLE or INDEX) so both can share the same underlying table
 // without a second catalog table or a second replay mechanism.
 //
-// One real gap this phase doesn't paper over: DurableStore only
-// supports point lookups right now, not "list every key in a range"
-// (that's Phase 10's range-scan job). So rebuilding the in-memory
-// catalog on startup can't ask the index "show me every catalog
-// row" -- instead, Catalog does its own independent pass over the
-// same WAL file DurableStore already replayed, filtering for entries
-// whose packed key belongs to the catalog table. A little redundant
-// (the WAL gets replayed twice on startup), but simple and correct,
-// and it doesn't require inventing a capability that legitimately
-// belongs to a later phase.
+// On startup the catalog rebuilds itself by range-scanning its own
+// rows (table id 0) out of the store. The first version couldn't do
+// that, because range scans didn't exist yet, so it made its own second
+// pass over the write-ahead log instead. That stopped working once
+// checkpointing started emptying the log, since the rows can now live
+// in a snapshot instead.
 #pragma once
 
 #include <cstdint>
@@ -29,7 +25,6 @@
 #include "durable_store.h"
 #include "row_format.h"
 #include "table_key.h"
-#include "write_ahead_log.h"
 
 constexpr int32_t CATALOG_TABLE_ID = 0;
 
@@ -55,7 +50,7 @@ struct IndexInfo {
 
 class Catalog {
  public:
-  Catalog(DurableStore& store, const std::string& wal_path) : store_(store) { load_existing(wal_path); }
+  explicit Catalog(DurableStore& store) : store_(store) { load_existing(); }
 
   // Creates a new table and returns its table_id, or -1 if the name
   // is already taken.
@@ -150,16 +145,15 @@ class Catalog {
     store_.put(key, encode_row(row));
   }
 
-  void load_existing(const std::string& wal_path) {
-    for (const WalRecord& rec : WriteAheadLog::replay(wal_path)) {
-      if (rec.type != WalRecordType::PUT) continue;  // a catalog row is never deleted via the SQL interface
-      if (unpack_table_id(rec.key) != CATALOG_TABLE_ID) continue;
-
-      std::vector<Value> row = decode_row(rec.value);
+  void load_existing() {
+    const int64_t first = pack_key(CATALOG_TABLE_ID, 0);
+    const int64_t last = pack_key(CATALOG_TABLE_ID, PRIMARY_KEY_MASK);
+    for (const auto& [key, raw] : store_.range_scan(first, last)) {
+      std::vector<Value> row = decode_row(raw);
       const CatalogEntryKind kind = static_cast<CatalogEntryKind>(row[0].int_val);
 
       if (kind == CatalogEntryKind::TABLE) {
-        const int32_t table_id = static_cast<int32_t>(unpack_primary_key(rec.key));
+        const int32_t table_id = static_cast<int32_t>(unpack_primary_key(key));
         TableSchema schema;
         schema.table_id = table_id;
         schema.name = row[1].text_val;

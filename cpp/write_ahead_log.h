@@ -26,10 +26,10 @@
 //     the file back to it before anything new is appended.
 // Recovery stops at the first bad record even if later bytes look
 // fine, since nothing after a damaged record can be trusted to line
-// up. That's the usual rule for write-ahead logs. One thing still not
-// handled: after creating a new log, the parent directory isn't
-// fsync'd, which some filesystems need before the new file itself is
-// guaranteed to survive a crash.
+// up. That's the usual rule for write-ahead logs. When a new log file
+// is created, its parent directory is fsync'd too, since some
+// filesystems need that before the new file itself is guaranteed to
+// survive a crash.
 //
 // Layout: "LIDXWAL2", then for each record
 //   type (1 byte) | key (8) | value length (4) | value | CRC-32 (4)
@@ -75,6 +75,21 @@ inline uint32_t crc32(const unsigned char* data, size_t len) {
   return c ^ 0xFFFFFFFFu;
 }
 
+// fsyncs the directory containing `path`, which is what makes a newly
+// created or renamed file's directory entry durable. Best effort: some
+// filesystems don't allow opening or syncing a directory, and there's
+// nothing more to do on those.
+inline void fsync_parent_dir(const std::string& path) {
+  const size_t slash = path.find_last_of('/');
+  const std::string dir = (slash == std::string::npos) ? "." : (slash == 0 ? "/" : path.substr(0, slash));
+  const int fd = open(dir.c_str(), O_RDONLY | O_DIRECTORY);
+  if (fd < 0) return;
+  if (fsync(fd) != 0) {
+    // see above: best effort
+  }
+  close(fd);
+}
+
 class WriteAheadLog {
  public:
   static constexpr char MAGIC[] = "LIDXWAL2";
@@ -113,6 +128,18 @@ class WriteAheadLog {
   void log_put(int64_t key, const std::string& value) { append(WalRecordType::PUT, key, value); }
   void log_delete(int64_t key) { append(WalRecordType::DELETE, key, std::string()); }
 
+  // Empties the log back to just its header. Only safe once everything
+  // in it is saved somewhere else: DurableStore::checkpoint() calls it
+  // after the snapshot is on disk.
+  void reset() {
+    if (ftruncate(fd_, static_cast<off_t>(MAGIC_LEN)) != 0 || fsync(fd_) != 0) {
+      throw std::runtime_error("could not empty the WAL file");
+    }
+    size_ = MAGIC_LEN;
+  }
+
+  uint64_t size_bytes() const { return size_; }
+
   // Every intact record in order, for replay on startup. A missing
   // file means a fresh start. Reading stops at the first record that's
   // cut short or fails its checksum.
@@ -145,6 +172,7 @@ class WriteAheadLog {
       if (ftruncate(fd_, 0) != 0 || !write_all(MAGIC, MAGIC_LEN) || fsync(fd_) != 0) {
         throw std::runtime_error("could not initialize WAL file: " + path);
       }
+      fsync_parent_dir(path);
       size_ = MAGIC_LEN;
       return;
     }

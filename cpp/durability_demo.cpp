@@ -18,7 +18,7 @@
 
 int main() {
   const std::string wal_path = "results/phase5_demo.wal";
-  std::remove(wal_path.c_str());  // clean slate for a reproducible run
+  DurableStore::destroy(wal_path);  // clean slate for a reproducible run
 
   const int64_t eps = 64;
   const double density = 0.7;

@@ -74,6 +74,19 @@ class BasicGappedArray {
     return ga;
   }
 
+  // Same, for an array that stores values: values[i] goes with
+  // sorted_keys[i]. Loading a checkpoint snapshot uses this, which lays
+  // everything out in one pass instead of inserting keys one at a time.
+  static BasicGappedArray build(const std::vector<int64_t>& sorted_keys, std::vector<V> values,
+                                double target_density, int64_t eps) {
+    static_assert(kStoresValues, "this build() needs a gapped array that stores values");
+    BasicGappedArray ga;
+    ga.density_ = target_density;
+    ga.eps_ = eps;
+    ga.layout(sorted_keys, &values);
+    return ga;
+  }
+
   // A key is present iff the first real key >= it *is* it. Goes
   // through the same locate() walk as every other lookup below, so
   // there's one place where a prediction becomes an answer -- not

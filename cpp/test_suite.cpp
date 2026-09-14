@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <map>
 #include <random>
 #include <set>
@@ -360,6 +361,119 @@ void test_gapped_array_values() {
   check(rebalances > 0, "rebalances actually happened during those trials");
 }
 
+// Checkpointing: the whole store goes into a snapshot and the log is
+// emptied. Every case restarts from disk and compares the result with a
+// std::map that saw the same writes.
+void test_checkpointing() {
+  std::printf("-- checkpointing --\n");
+  const std::string path = "results/test_checkpoint.wal";
+  using Pairs = std::vector<std::pair<int64_t, std::string>>;
+  std::map<int64_t, std::string> truth;
+  auto put = [&](DurableStore& s, int64_t k, const std::string& v) {
+    s.put(k, v);
+    truth[k] = v;
+  };
+  auto del = [&](DurableStore& s, int64_t k) {
+    s.remove(k);
+    truth.erase(k);
+  };
+  auto matches_truth = [&](const DurableStore& s) {
+    return s.range_scan(INT64_MIN, INT64_MAX - 1) == Pairs(truth.begin(), truth.end());
+  };
+  auto read_bytes = [](const std::string& p) {
+    std::ifstream f(p, std::ios::binary);
+    return std::string(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
+  };
+  auto write_bytes = [](const std::string& p, const std::string& bytes) {
+    std::ofstream f(p, std::ios::binary | std::ios::trunc);
+    f << bytes;
+  };
+
+  DurableStore::destroy(path);
+  {
+    DurableStore s(path, 0.7, 64, 0);  // automatic checkpoints off for these cases
+    for (int64_t k = 1; k <= 300; k++) put(s, k, "first_" + std::to_string(k));
+    for (int64_t k = 1; k <= 300; k += 3) del(s, k);
+    s.checkpoint();
+    check(std::filesystem::file_size(path) == WriteAheadLog::MAGIC_LEN && std::filesystem::exists(path + ".snapshot"),
+          "a checkpoint writes a snapshot and empties the log");
+    // after the checkpoint: overwrite some keys, delete some, add new ones
+    for (int64_t k = 2; k <= 300; k += 3) put(s, k, "second_" + std::to_string(k));
+    for (int64_t k = 3; k <= 60; k += 3) del(s, k);
+    for (int64_t k = 301; k <= 320; k++) put(s, k, "second_" + std::to_string(k));
+  }
+  {
+    DurableStore s(path, 0.7, 64, 0);
+    check(s.snapshot_entries() == 200 && matches_truth(s),
+          "restart = the snapshot plus the overwrites, deletes, and new keys logged after it");
+  }
+
+  // A crash after the new snapshot is renamed into place but before the
+  // log is emptied leaves both behind. Replaying that log on top of the
+  // snapshot has to end in the same state.
+  {
+    std::string unemptied_log;
+    {
+      DurableStore s(path, 0.7, 64, 0);
+      unemptied_log = read_bytes(path);
+      s.checkpoint();
+    }
+    write_bytes(path, unemptied_log);
+    DurableStore s(path, 0.7, 64, 0);
+    check(matches_truth(s), "a crash between writing the snapshot and emptying the log loses nothing");
+  }
+
+  // A crash partway through writing a snapshot leaves only the temporary
+  // file. Startup ignores it, and the next checkpoint replaces it.
+  write_bytes(path + ".snapshot.tmp", "half of a snapshot");
+  {
+    DurableStore s(path, 0.7, 64, 0);
+    bool ok = matches_truth(s);
+    put(s, 999, "after");
+    s.checkpoint();
+    ok = ok && matches_truth(s);
+    check(ok, "a leftover temporary snapshot is ignored, and the next checkpoint writes over it");
+  }
+  {
+    DurableStore s(path, 0.7, 64, 0);
+    check(matches_truth(s), "...and the state after that checkpoint comes back intact");
+  }
+
+  // A damaged snapshot has to be refused: skipping it would quietly lose
+  // everything the emptied log no longer has.
+  {
+    const std::string snap = path + ".snapshot";
+    const auto middle = static_cast<std::streamoff>(std::filesystem::file_size(snap) / 2);
+    std::fstream f(snap, std::ios::binary | std::ios::in | std::ios::out);
+    f.seekg(middle);
+    const char byte = static_cast<char>(f.get());
+    f.seekp(middle);
+    f.put(static_cast<char>(byte ^ 0xFF));
+  }
+  bool refused = false;
+  try {
+    DurableStore s(path, 0.7, 64, 0);
+  } catch (const std::exception&) {
+    refused = true;
+  }
+  check(refused, "a damaged snapshot is refused rather than silently skipped");
+
+  // Automatic checkpoints: one every 50 writes.
+  DurableStore::destroy(path);
+  truth.clear();
+  {
+    DurableStore s(path, 0.7, 64, 50);
+    for (int64_t i = 0; i < 175; i++) put(s, i % 60, "auto_" + std::to_string(i));
+    check(s.checkpoints() == 3, "automatic checkpoints: 3 of them after 175 writes at one per 50");
+  }
+  {
+    DurableStore s(path, 0.7, 64, 50);
+    check(matches_truth(s) && s.snapshot_entries() == 60 && s.recovered_entries() == 25,
+          "restart loads the last snapshot and replays only the 25 writes after it");
+  }
+  DurableStore::destroy(path);
+}
+
 // Crash recovery for the write-ahead log. Each case writes a real log
 // through DurableStore, damages the file the way a crash or a bad disk
 // can, and restarts from it.
@@ -456,6 +570,7 @@ int main() {
   test_gapped_array();
   test_untrained_keys();
   test_gapped_array_values();
+  test_checkpointing();
   test_wal_recovery();
 
   std::printf("\n%d/%d tests passed\n", tests_passed, tests_run);
