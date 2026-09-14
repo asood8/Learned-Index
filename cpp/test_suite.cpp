@@ -7,12 +7,16 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
+#include <filesystem>
+#include <fstream>
+#include <map>
 #include <random>
 #include <set>
 #include <string>
 #include <vector>
 
 #include "bplus_tree.h"
+#include "durable_store.h"
 #include "gapped_array.h"
 #include "linear_model.h"
 #include "segmented_model.h"
@@ -118,6 +122,94 @@ void test_segmented_model() {
     if (!segmented_search(keys, model, keys[i], v) || v != static_cast<int64_t>(i)) all_found = false;
   }
   check(all_found, "irregularly-spaced data: every key found with correct position");
+}
+
+// An exact but slow way to decide whether one line can fit points
+// [from, to) within eps. If any line fits, a corner of the region of
+// fitting lines does too, and every corner is a line through two of the
+// points' gap endpoints, so trying every such pair is enough.
+static bool run_fits_brute_force(const std::vector<int64_t>& xs, const std::vector<int64_t>& ys, size_t from,
+                                 size_t to, int64_t eps) {
+  if (to - from == 1) return true;
+  for (size_t a = from; a < to; a++) {
+    for (size_t b = a + 1; b < to; b++) {
+      for (int64_t da : {-eps, eps}) {
+        for (int64_t db : {-eps, eps}) {
+          const __int128 xa = xs[a], ya = ys[a] + da, xb = xs[b], yb = ys[b] + db;
+          bool all_fit = true;
+          for (size_t i = from; i < to && all_fit; i++) {
+            const __int128 scaled = ya * (xb - xa) + (yb - ya) * (xs[i] - xa);  // the line at xs[i], times (xb - xa)
+            all_fit = (ys[i] - eps) * (xb - xa) <= scaled && scaled <= (ys[i] + eps) * (xb - xa);
+          }
+          if (all_fit) return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
+void test_optimal_segmentation() {
+  std::printf("-- optimal segmentation --\n");
+
+  // Greedy extension with an exact fits-or-not test gives the minimum
+  // number of segments, so the fast version has to match it exactly.
+  int mismatches = 0;
+  for (int t = 0; t < 400; t++) {
+    std::mt19937_64 rng(3000 + t);
+    const int64_t eps = 1 + static_cast<int64_t>(rng() % 3);
+    const size_t n = 5 + rng() % 40;
+    std::vector<int64_t> xs(n), ys(n);
+    int64_t x = 0, y = 0;
+    for (size_t i = 0; i < n; i++) {
+      x += 1 + static_cast<int64_t>(rng() % 8 == 0 ? rng() % 200 : rng() % 10);
+      // positions that only go up (the real use), or wander both ways
+      y += (t % 2 == 0) ? 1 + static_cast<int64_t>(rng() % 3) : static_cast<int64_t>(rng() % 11) - 5;
+      xs[i] = x;
+      ys[i] = y;
+    }
+    std::vector<int64_t> expected_starts;
+    for (size_t from = 0; from < n;) {
+      size_t to = from + 1;
+      while (to < n && run_fits_brute_force(xs, ys, from, to + 1, eps)) to++;
+      expected_starts.push_back(xs[from]);
+      from = to;
+    }
+    std::vector<int64_t> starts;
+    for (const Segment& s : build_optimal_segmented_model(xs, ys, eps).segments) starts.push_back(s.start_key);
+    if (starts != expected_starts) mismatches++;
+  }
+  check(mismatches == 0, "400 small random inputs: exactly the segments a brute-force greedy search finds");
+
+  // On a big input, every key's prediction -- computed in doubles, the
+  // way lookups compute it -- has to land within eps.
+  std::mt19937_64 rng(4242);
+  std::vector<int64_t> keys;
+  int64_t k = 0;
+  for (int i = 0; i < 200000; i++) {
+    k += 1 + static_cast<int64_t>(rng() % 50);
+    if (rng() % 5000 == 0) k += static_cast<int64_t>(rng() % 100000000);  // occasional huge jumps
+    keys.push_back(k);
+  }
+  const int64_t eps = 32;
+  const SegmentedModel optimal = build_optimal_segmented_model(keys, eps);
+  const SegmentedModel pinned = build_segmented_model(keys, eps);
+  bool within_eps = true;
+  for (size_t i = 0; i < keys.size(); i++) {
+    const Segment& seg = optimal.segments[find_segment_index(optimal.segments, keys[i])];
+    const int64_t predicted = static_cast<int64_t>(std::llround(seg.slope * static_cast<double>(keys[i]) + seg.intercept));
+    if (std::llabs(predicted - static_cast<int64_t>(i)) > eps) within_eps = false;
+  }
+  check(within_eps, "optimal model: every one of 200k keys predicted within eps");
+  bool all_found = true;
+  for (size_t i = 0; i < keys.size(); i++) {
+    int64_t v;
+    if (!segmented_search(keys, optimal, keys[i], v) || v != static_cast<int64_t>(i)) all_found = false;
+  }
+  check(all_found, "optimal model: every key found at its exact position");
+  std::printf("    (200k irregular keys, eps=32: %zu segments optimal, %zu pinned)\n", optimal.segments.size(),
+              pinned.segments.size());
+  check(optimal.segments.size() <= pinned.segments.size(), "optimal model never needs more segments than pinned");
 }
 
 void test_gapped_array() {
@@ -226,12 +318,145 @@ void test_untrained_keys() {
   check(bad_trials == 0, "100 randomized outlier trials (inserts + removes): scans and lookups match ground truth");
 }
 
+// The gapped array can carry a value for each key, and DurableStore keeps
+// its rows that way. Random inserts, overwrites, and removes are checked
+// against a std::map, with a small eps in half the trials so local and
+// full rebalances happen constantly, to make sure every value stays with
+// its key through shifts and rebalances.
+void test_gapped_array_values() {
+  std::printf("-- gapped array with values --\n");
+  using ValueArray = BasicGappedArray<std::string>;
+  using Pairs = std::vector<std::pair<int64_t, std::string>>;
+  int bad_trials = 0;
+  size_t rebalances = 0;
+  for (int t = 0; t < 30; t++) {
+    std::mt19937_64 rng(9000 + t);
+    ValueArray ga = ValueArray::build({}, 0.7, (t % 2 == 0) ? 4 : 64);
+    const int64_t spread = (t % 3 == 0) ? 1000003 : 1;  // some trials use widely spaced keys
+    std::map<int64_t, std::string> truth;
+    bool ok = true;
+    for (int op = 0; op < 3000 && ok; op++) {
+      const int64_t k = static_cast<int64_t>(rng() % 2000) * spread;
+      if (rng() % 4 == 0) {
+        ga.remove(k);
+        truth.erase(k);
+      } else {
+        const std::string v = "value_" + std::to_string(rng() % 100000);
+        ga.insert(k, v);
+        truth[k] = v;
+      }
+      if (op % 100 == 99) ok = ga.range_scan(INT64_MIN, INT64_MAX - 1) == Pairs(truth.begin(), truth.end());
+    }
+    std::string v;
+    for (const auto& [k, want] : truth) {
+      if (!ga.get(k, v) || v != want) ok = false;
+    }
+    if (ga.get(-1, v) || ga.size() != truth.size()) ok = false;
+    rebalances += ga.rebalance_count() + ga.local_rebalance_count();
+    if (!ok) bad_trials++;
+  }
+  check(bad_trials == 0, "30 randomized trials: every value stays with its key through inserts, overwrites, "
+                         "removes, and rebalances");
+  check(rebalances > 0, "rebalances actually happened during those trials");
+}
+
+// Crash recovery for the write-ahead log. Each case writes a real log
+// through DurableStore, damages the file the way a crash or a bad disk
+// can, and restarts from it.
+void test_wal_recovery() {
+  std::printf("-- write-ahead log crash recovery --\n");
+  const std::string path = "results/test_wal_recovery.wal";
+  auto fresh_log = [&](int n) {
+    std::remove(path.c_str());
+    DurableStore s(path, 0.7, 64);
+    for (int k = 1; k <= n; k++) s.put(k, "value_" + std::to_string(k));
+  };
+  // how many of keys 1..n come back with exactly the value written
+  auto intact_count = [](DurableStore& s, int n) {
+    int count = 0;
+    std::string v;
+    for (int k = 1; k <= n; k++) {
+      if (s.get(k, v) && v == "value_" + std::to_string(k)) count++;
+    }
+    return count;
+  };
+
+  // A crash in the middle of an append leaves a torn last record. The
+  // restart after it has to drop that record, and writes made after
+  // that restart have to survive the next one.
+  fresh_log(100);
+  std::filesystem::resize_file(path, std::filesystem::file_size(path) - 3);
+  {
+    DurableStore s(path, 0.7, 64);
+    check(s.size() == 99 && intact_count(s, 99) == 99, "torn last record: dropped, everything before it kept");
+    s.put(1000, "written_after_recovery");
+  }
+  {
+    DurableStore s(path, 0.7, 64);
+    std::string v;
+    check(s.get(1000, v) && v == "written_after_recovery" && s.size() == 100 && intact_count(s, 99) == 99,
+          "torn last record: writes made after recovery survive the next restart");
+  }
+
+  // Some filesystems can leave zero-filled blocks at the end of a file
+  // after a crash. Zeros must not be read back as records.
+  fresh_log(10);
+  {
+    std::ofstream f(path, std::ios::binary | std::ios::app);
+    f << std::string(64, '\0');
+  }
+  {
+    DurableStore s(path, 0.7, 64);
+    std::string v;
+    check(s.size() == 10 && !s.get(0, v), "zero-filled tail is not read back as records");
+  }
+
+  // One damaged byte in the middle of the log. Whatever comes back has
+  // to be exactly what was written; nothing past the damage is trusted.
+  fresh_log(100);
+  {
+    const auto middle = static_cast<std::streamoff>(std::filesystem::file_size(path) / 2);
+    std::fstream f(path, std::ios::binary | std::ios::in | std::ios::out);
+    f.seekg(middle);
+    const char byte = static_cast<char>(f.get());
+    f.seekp(middle);
+    f.put(static_cast<char>(byte ^ 0xFF));
+  }
+  {
+    DurableStore s(path, 0.7, 64);
+    check(s.size() < 100 && intact_count(s, 100) == static_cast<int>(s.size()),
+          "damaged byte mid-log: no wrong values, nothing after the damage kept");
+  }
+
+  // A file that isn't a log in the current format has to be refused
+  // and left alone -- not treated as one long torn record and cut to
+  // nothing.
+  std::remove(path.c_str());
+  {
+    std::ofstream f(path, std::ios::binary);
+    f << "definitely not a write-ahead log";
+  }
+  const auto size_before = std::filesystem::file_size(path);
+  bool refused = false;
+  try {
+    DurableStore s(path, 0.7, 64);
+  } catch (const std::exception&) {
+    refused = true;
+  }
+  check(refused && std::filesystem::file_size(path) == size_before,
+        "a file in an unrecognized format is refused and left untouched");
+  std::remove(path.c_str());
+}
+
 int main() {
   test_bplus_tree();
   test_linear_model();
   test_segmented_model();
+  test_optimal_segmentation();
   test_gapped_array();
   test_untrained_keys();
+  test_gapped_array_values();
+  test_wal_recovery();
 
   std::printf("\n%d/%d tests passed\n", tests_passed, tests_run);
   return (tests_passed == tests_run) ? 0 : 1;

@@ -17,28 +17,60 @@
 // safety net, since a single insert's shift can occasionally still
 // reach across a segment boundary (bounded by max_gap_scan_, but not
 // perfectly confined to one segment's territory).
+//
+// v3: it can store a value with each key. DurableStore used to keep
+// rows in a separate std::unordered_map and use this array only to
+// track which keys existed and in what order, so a point lookup
+// searched the learned index and then the hash map, and the hash map
+// could have answered by itself. BasicGappedArray<V> keeps each value
+// in a parallel array next to its key, and every shift, removal, and
+// rebalance moves the two together. GappedArray (V = NoValue) is the
+// key-only version the benchmarks use; with NoValue, all of the value
+// handling is compiled out by `if constexpr`.
+//
+// The model here is still fit with the pinned-anchor
+// build_segmented_model(), not build_optimal_segmented_model(). The
+// optimal fit needs about a quarter fewer segments on this layout (180
+// vs 235 on 1M wide-range lognormal keys), but it took 4-7x longer to
+// fit, and this
+// array refits its whole model on every full rebalance (195 of them per
+// 100k inserts in the Phase 3 benchmark). Switching made inserts about
+// 2.5x slower, in exchange for saving ~1 KB of segments.
 #pragma once
 
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
 #include "segmented_model.h"
 
-class GappedArray {
+struct NoValue {};
+
+struct GappedSearchDiagnostics {
+  bool found = false;
+  size_t index = 0;
+  int64_t predicted_position = 0;
+  int probes = 0;  // slots actually examined during the local scan
+};
+
+template <typename V>
+class BasicGappedArray {
  public:
   static constexpr int64_t EMPTY_SLOT = INT64_MAX;
+  static constexpr bool kStoresValues = !std::is_same_v<V, NoValue>;
+  using SearchDiagnostics = GappedSearchDiagnostics;
 
   // Builds from a sorted, unique key list. target_density in (0,1]:
   // 0.7 means real keys occupy about 70% of the array, the rest left
-  // as gaps.
-  static GappedArray build(const std::vector<int64_t>& sorted_keys, double target_density,
-                            int64_t eps) {
-    GappedArray ga;
+  // as gaps. Any values start out empty.
+  static BasicGappedArray build(const std::vector<int64_t>& sorted_keys, double target_density, int64_t eps) {
+    BasicGappedArray ga;
     ga.density_ = target_density;
     ga.eps_ = eps;
-    ga.layout(sorted_keys);
+    ga.layout(sorted_keys, nullptr);
     return ga;
   }
 
@@ -54,6 +86,15 @@ class GappedArray {
     return true;
   }
 
+  // The value stored with `key`, if the key is present.
+  bool get(int64_t key, V& out) const {
+    static_assert(kStoresValues, "get() needs a gapped array that stores values");
+    size_t idx;
+    if (!search(key, idx)) return false;
+    out = vals_[idx];
+    return true;
+  }
+
   // Removes a key by turning its slot back into a gap -- reusing the
   // exact concept that makes inserts cheap in the first place, rather
   // than needing a separate "tombstone" mechanism. The model isn't
@@ -64,16 +105,13 @@ class GappedArray {
     size_t idx;
     if (!search(key, idx)) return false;
     data_[idx] = EMPTY_SLOT;
+    if constexpr (kStoresValues) {
+      V empty{};
+      std::swap(vals_[idx], empty);  // frees the old value's memory now, not at the next rebalance
+    }
     count_--;
     return true;
   }
-
-  struct SearchDiagnostics {
-    bool found = false;
-    size_t index = 0;
-    int64_t predicted_position = 0;
-    int probes = 0;  // slots actually examined during the local scan
-  };
 
   // Identical logic to search(), but tracks and returns the model's
   // raw prediction and how many slots the walk actually examined --
@@ -104,28 +142,30 @@ class GappedArray {
   // bounds -- the model only helps find where to *start* scanning.
   std::vector<int64_t> range_scan_keys(int64_t lo, int64_t hi) const {
     std::vector<int64_t> results;
-    size_t idx = lower_bound_index(lo);
-    const size_t n = data_.size();
-    while (idx < n) {
-      if (data_[idx] != EMPTY_SLOT) {
-        if (data_[idx] > hi) break;  // a real key past the range: stop here
-        results.push_back(data_[idx]);
-      }
-      idx++;  // a gap: skip it and keep going, don't stop the scan
-    }
+    scan(lo, hi, [&](size_t idx) { results.push_back(data_[idx]); });
+    return results;
+  }
+
+  // Same, with each key's value.
+  std::vector<std::pair<int64_t, V>> range_scan(int64_t lo, int64_t hi) const {
+    static_assert(kStoresValues, "range_scan() needs a gapped array that stores values");
+    std::vector<std::pair<int64_t, V>> results;
+    scan(lo, hi, [&](size_t idx) { results.emplace_back(data_[idx], vals_[idx]); });
     return results;
   }
 
   // Inserts key in sorted order. Tries a nearby gap first; falls back
   // to a full rebuild only when the local area has run out of room --
   // the same "batch retrain" idea mentioned as the easy option, used
-  // here only as a last resort instead of the default behavior.
-  void insert(int64_t key) {
+  // here only as a last resort instead of the default behavior. If the
+  // key is already present, a key-only array does nothing and one that
+  // stores values replaces the value, so insert() doubles as update.
+  void insert(int64_t key, V value = V()) {
     if (model_.segments.empty()) {
       // nothing to route against yet -- bootstrap the structure from
       // scratch with just this one key, same fallback path used when
       // a local area is completely out of room
-      rebalance_with(key);
+      rebalance_with(key, std::move(value));
       return;
     }
 
@@ -141,21 +181,22 @@ class GappedArray {
     const int64_t insertion_point =
         static_cast<int64_t>(locate(predict_from(owning_segment, key), key, nullptr));
     if (insertion_point < static_cast<int64_t>(data_.size()) && data_[insertion_point] == key) {
-      return;  // key already present: no-op, not a second copy
+      if constexpr (kStoresValues) vals_[insertion_point] = std::move(value);
+      return;  // key already present: never a second copy
     }
 
     const int64_t gap = find_nearest_gap(insertion_point);
     if (gap < 0) {
-      rebalance_with(key);
+      rebalance_with(key, std::move(value));
       return;
     }
 
     if (gap < insertion_point) {
-      for (int64_t idx = gap; idx < insertion_point - 1; idx++) data_[idx] = data_[idx + 1];
-      data_[insertion_point - 1] = key;
+      for (int64_t idx = gap; idx < insertion_point - 1; idx++) move_slot(idx + 1, idx);
+      place(insertion_point - 1, key, std::move(value));
     } else {
-      for (int64_t idx = gap; idx > insertion_point; idx--) data_[idx] = data_[idx - 1];
-      data_[insertion_point] = key;
+      for (int64_t idx = gap; idx > insertion_point; idx--) move_slot(idx - 1, idx);
+      place(insertion_point, key, std::move(value));
     }
     count_++;
 
@@ -185,6 +226,7 @@ class GappedArray {
 
  private:
   std::vector<int64_t> data_;
+  std::vector<V> vals_;  // parallel to data_; stays empty when V is NoValue
   SegmentedModel model_;
   std::vector<size_t> segment_insert_counts_;  // parallel to model_.segments
   double density_ = 0.7;
@@ -196,6 +238,31 @@ class GappedArray {
   size_t segment_threshold_ = 1;   // per-segment inserts before a local rebalance
   size_t global_threshold_ = 1;    // total inserts before a full-array safety-net rebalance
   int64_t max_gap_scan_ = 1;       // bounds how far a single insert's shift can reach
+
+  // Every slot move goes through these two, so a value can't be left
+  // behind when its key moves.
+  void move_slot(int64_t from, int64_t to) {
+    data_[to] = data_[from];
+    if constexpr (kStoresValues) vals_[to] = std::move(vals_[from]);
+  }
+  void place(int64_t idx, int64_t key, [[maybe_unused]] V&& value) {
+    data_[idx] = key;
+    if constexpr (kStoresValues) vals_[idx] = std::move(value);
+  }
+
+  // Calls visit(slot) for every real key in [lo, hi], in sorted order.
+  template <typename Visit>
+  void scan(int64_t lo, int64_t hi, Visit visit) const {
+    size_t idx = lower_bound_index(lo);
+    const size_t n = data_.size();
+    while (idx < n) {
+      if (data_[idx] != EMPTY_SLOT) {
+        if (data_[idx] > hi) break;  // a real key past the range: stop here
+        visit(idx);
+      }
+      idx++;  // a gap: skip it and keep going, don't stop the scan
+    }
+  }
 
   int64_t predict(int64_t key) const {
     return predict_from(find_segment_index(model_.segments, key), key);
@@ -282,16 +349,18 @@ class GappedArray {
     return -1;  // essentially full nearby; caller should rebalance
   }
 
-  // Lays a sorted, gap-free key list out into a fresh gapped array,
-  // spacing keys proportionally across the larger capacity, then
-  // refits the segmented model against these new gapped positions.
-  // Used for the initial build and every full-array rebalance.
-  void layout(const std::vector<int64_t>& sorted_keys) {
+  // Lays a sorted, gap-free key list (and its values, if given) out
+  // into a fresh gapped array, spacing keys proportionally across the
+  // larger capacity, then refits the segmented model against these new
+  // gapped positions. Used for the initial build and every full-array
+  // rebalance.
+  void layout(const std::vector<int64_t>& sorted_keys, [[maybe_unused]] std::vector<V>* values) {
     const size_t n = sorted_keys.size();
     size_t capacity = (n == 0) ? 0 : static_cast<size_t>(std::ceil(static_cast<double>(n) / density_));
     capacity = std::max(capacity, n);
 
     data_.assign(capacity, EMPTY_SLOT);
+    if constexpr (kStoresValues) vals_.assign(capacity, V());
 
     std::vector<int64_t> positions(n);
     int64_t last_slot = -1;
@@ -301,6 +370,9 @@ class GappedArray {
       if (target <= last_slot) target = last_slot + 1;  // same nudge-on-collision trick as data_gen.py's skewed generator
       target = std::min<int64_t>(target, static_cast<int64_t>(capacity) - 1);
       data_[target] = sorted_keys[i];
+      if constexpr (kStoresValues) {
+        if (values != nullptr) vals_[target] = std::move((*values)[i]);
+      }
       positions[i] = target;
       last_slot = target;
     }
@@ -321,29 +393,37 @@ class GappedArray {
     max_gap_scan_ = std::max<int64_t>(1, eps_ * 8);
   }
 
+  // Pulls every real key (and its value) out of the array, in order.
+  void collect_all(std::vector<int64_t>& keys, [[maybe_unused]] std::vector<V>& values) {
+    keys.reserve(count_ + 1);
+    if constexpr (kStoresValues) values.reserve(count_ + 1);
+    for (size_t i = 0; i < data_.size(); i++) {
+      if (data_[i] == EMPTY_SLOT) continue;
+      keys.push_back(data_[i]);
+      if constexpr (kStoresValues) values.push_back(std::move(vals_[i]));
+    }
+  }
+
   // Refreshes the layout and model from whatever keys are currently
   // in the array -- the full-array safety net, and the fallback when
   // a local gap search comes up completely empty.
   void rebalance() {
     std::vector<int64_t> all_keys;
-    all_keys.reserve(count_);
-    for (int64_t v : data_) {
-      if (v != EMPTY_SLOT) all_keys.push_back(v);
-    }
-    layout(all_keys);
+    std::vector<V> all_values;
+    collect_all(all_keys, all_values);
+    layout(all_keys, &all_values);
     rebalance_count_++;
   }
 
-  void rebalance_with(int64_t new_key) {
+  void rebalance_with(int64_t new_key, [[maybe_unused]] V value) {
     std::vector<int64_t> all_keys;
-    all_keys.reserve(count_ + 1);
-    for (int64_t v : data_) {
-      if (v != EMPTY_SLOT) all_keys.push_back(v);
-    }
-    auto it = std::lower_bound(all_keys.begin(), all_keys.end(), new_key);
-    all_keys.insert(it, new_key);
+    std::vector<V> all_values;
+    collect_all(all_keys, all_values);
+    const auto pos = std::lower_bound(all_keys.begin(), all_keys.end(), new_key) - all_keys.begin();
+    all_keys.insert(all_keys.begin() + pos, new_key);
+    if constexpr (kStoresValues) all_values.insert(all_values.begin() + pos, std::move(value));
 
-    layout(all_keys);
+    layout(all_keys, &all_values);
     rebalance_count_++;
   }
 
@@ -375,20 +455,31 @@ class GappedArray {
       }
     }
 
-    std::vector<int64_t> local_keys;
+    size_t local_count = 0;
     for (size_t idx = phys_lo; idx < phys_hi_exclusive; idx++) {
-      if (data_[idx] != EMPTY_SLOT) local_keys.push_back(data_[idx]);
+      if (data_[idx] != EMPTY_SLOT) local_count++;
     }
 
     const size_t region_capacity = phys_hi_exclusive - phys_lo;
     // if this region has grown too dense, a local fix won't leave
     // enough room to be worth it -- fall back to the full rebalance
-    if (region_capacity == 0 || local_keys.size() >= static_cast<size_t>(0.9 * region_capacity)) {
+    if (region_capacity == 0 || local_count >= static_cast<size_t>(0.9 * region_capacity)) {
       rebalance();
       return;
     }
 
-    for (size_t idx = phys_lo; idx < phys_hi_exclusive; idx++) data_[idx] = EMPTY_SLOT;
+    std::vector<int64_t> local_keys;
+    std::vector<V> local_values;
+    local_keys.reserve(local_count);
+    if constexpr (kStoresValues) local_values.reserve(local_count);
+    for (size_t idx = phys_lo; idx < phys_hi_exclusive; idx++) {
+      if (data_[idx] != EMPTY_SLOT) {
+        local_keys.push_back(data_[idx]);
+        if constexpr (kStoresValues) local_values.push_back(std::move(vals_[idx]));
+      }
+      data_[idx] = EMPTY_SLOT;
+      if constexpr (kStoresValues) vals_[idx] = V();
+    }
 
     std::vector<int64_t> local_positions(local_keys.size());
     int64_t last_slot = static_cast<int64_t>(phys_lo) - 1;
@@ -400,6 +491,7 @@ class GappedArray {
       if (target <= last_slot) target = last_slot + 1;
       target = std::min<int64_t>(target, static_cast<int64_t>(phys_hi_exclusive) - 1);
       data_[target] = local_keys[i];
+      if constexpr (kStoresValues) vals_[target] = std::move(local_values[i]);
       local_positions[i] = target;
       last_slot = target;
     }
@@ -416,3 +508,5 @@ class GappedArray {
     local_rebalance_count_++;
   }
 };
+
+using GappedArray = BasicGappedArray<NoValue>;

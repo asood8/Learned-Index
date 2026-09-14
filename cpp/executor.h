@@ -84,8 +84,15 @@ class Executor {
 
     const int64_t primary_key = stmt.values[0].int_val;
     const int64_t key = pack_key(schema->table_id, primary_key);
+    // An INSERT on an existing primary key overwrites that row, so the
+    // old row's index entries have to go too. Without this, a query on
+    // the old value kept finding the row through the index even after
+    // its value changed (found by python/sqlite_diff_test.py).
+    std::string existing_raw;
+    const bool overwriting = store_.get(key, existing_raw);
+    const std::vector<Value> existing_row = overwriting ? decode_row(existing_raw) : std::vector<Value>();
     store_.put(key, encode_row(stmt.values));
-    sync_indexes(*schema, 0, nullptr, primary_key, &stmt.values);
+    sync_indexes(*schema, primary_key, overwriting ? &existing_row : nullptr, primary_key, &stmt.values);
     return result;
   }
 
@@ -188,10 +195,6 @@ class Executor {
                 });
     }
 
-    if (stmt.has_limit && static_cast<int64_t>(result.rows.size()) > stmt.limit_count) {
-      result.rows.resize(std::max<int64_t>(0, stmt.limit_count));
-    }
-
     if (stmt.target == SelectTarget::COUNT_STAR) {
       const int64_t count = static_cast<int64_t>(result.rows.size());
       result.rows.clear();
@@ -214,6 +217,15 @@ class Executor {
       result.rows.clear();
       result.rows.push_back({Value::make_int(total)});
       result.column_names = {"SUM(" + stmt.sum_column + ")"};
+    }
+
+    // LIMIT applies to the rows the query returns. For COUNT(*) and SUM
+    // that's the one summary row, not the rows being counted, so it has
+    // to come after the aggregate. It used to come before, which made
+    // COUNT(*) ... LIMIT 3 top out at 3 (found by the SQLite
+    // differential test).
+    if (stmt.has_limit && static_cast<int64_t>(result.rows.size()) > stmt.limit_count) {
+      result.rows.resize(std::max<int64_t>(0, stmt.limit_count));
     }
 
     return result;
@@ -248,6 +260,16 @@ class Executor {
       // Otherwise it's a straightforward put under the same key --
       // DurableStore::put already overwrites an existing key's value.
       const int64_t new_key = pk_changed ? pack_key(schema->table_id, row[0].int_val) : old_key;
+      if (pk_changed && new_key != old_key) {
+        // Moving onto a primary key another row already has overwrites
+        // that row, so its index entries have to be removed as well --
+        // the same problem as an overwriting INSERT.
+        std::string displaced_raw;
+        if (store_.get(new_key, displaced_raw)) {
+          const std::vector<Value> displaced = decode_row(displaced_raw);
+          sync_indexes(*schema, unpack_primary_key(new_key), &displaced, 0, nullptr);
+        }
+      }
       if (pk_changed) store_.remove(old_key);
       store_.put(new_key, encode_row(row));
       sync_indexes(*schema, unpack_primary_key(old_key), &old_row, unpack_primary_key(new_key), &row);

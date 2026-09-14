@@ -1,15 +1,19 @@
 // Phase 5 (extended in Phase 8, extended again for the DELETE stretch
-// goal): wraps the Phase 3 gapped array (for fast key existence/
-// position) with a real value store and the write-ahead log, giving
-// genuine key -> value storage instead of just key existence. put()
-// and remove() both log first, then apply -- on construction, any
-// existing log is replayed before anything else happens, so state
-// survives a restart.
+// goal): the gapped array plus the write-ahead log, giving real
+// key -> value storage. put() and remove() both log first, then apply
+// -- on construction, any existing log is replayed before anything
+// else happens, so state survives a restart.
+//
+// Rows are stored in the gapped array itself, next to their keys. They
+// used to live in a separate std::unordered_map, with the gapped array
+// only tracking which keys existed and in what order. That made the
+// learned index optional for point lookups: get() searched it and then
+// the hash map, and the hash map could have answered on its own. Now
+// the learned index is the only place a row lives.
 #pragma once
 
 #include <cstdint>
 #include <string>
-#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -18,21 +22,19 @@
 
 class DurableStore {
  public:
+  using RowArray = BasicGappedArray<std::string>;
+
   DurableStore(const std::string& wal_path, double density, int64_t eps)
-      : wal_(wal_path), index_(GappedArray::build({}, density, eps)) {
+      : wal_(wal_path), index_(RowArray::build({}, density, eps)) {
     const std::vector<WalRecord> recovered = WriteAheadLog::replay(wal_path);
     for (const WalRecord& rec : recovered) {
       if (rec.type == WalRecordType::PUT) {
-        // GappedArray::insert is already a no-op for a key that's
-        // already indexed (the Phase 4 duplicate-key fix), so this
-        // correctly handles both fresh keys and updates to existing
-        // ones without any special-casing here -- last value written
-        // for a given key wins, matching the log's own write order.
-        index_.insert(rec.key);
-        values_[rec.key] = rec.value;
+        // insert() replaces the value when the key is already present,
+        // so a key that was written several times ends up with the last
+        // value logged for it, matching the log's own order.
+        index_.insert(rec.key, rec.value);
       } else {
         index_.remove(rec.key);
-        values_.erase(rec.key);
       }
     }
     recovered_entries_ = recovered.size();
@@ -43,8 +45,7 @@ class DurableStore {
   // lines, the next startup's replay still recovers it.
   void put(int64_t key, const std::string& value) {
     wal_.log_put(key, value);
-    index_.insert(key);
-    values_[key] = value;
+    index_.insert(key, value);
   }
 
   // Durably removes key: logged first (so a crash right after this
@@ -55,22 +56,14 @@ class DurableStore {
     if (!index_.search(key, idx)) return false;
     wal_.log_delete(key);
     index_.remove(key);
-    values_.erase(key);
     return true;
   }
 
-  bool get(int64_t key, std::string& out_value) const {
-    size_t idx;
-    if (!index_.search(key, idx)) return false;
-    auto it = values_.find(key);
-    if (it == values_.end()) return false;  // shouldn't happen if index_ and values_ stay consistent
-    out_value = it->second;
-    return true;
-  }
+  bool get(int64_t key, std::string& out_value) const { return index_.get(key, out_value); }
 
   // Diagnostic-only variant for Phase 12's EXPLAIN -- reuses the
   // index's own instrumented search rather than duplicating its logic.
-  GappedArray::SearchDiagnostics get_explain(int64_t key) const { return index_.search_explain(key); }
+  GappedSearchDiagnostics get_explain(int64_t key) const { return index_.search_explain(key); }
 
   // All (key, value) pairs with key in [lo, hi], inclusive, in sorted
   // order. Used for both a full table scan (bounds covering the
@@ -78,12 +71,7 @@ class DurableStore {
   // scan (bounds from the WHERE clause) -- the executor doesn't need
   // two different code paths for those, just different bounds.
   std::vector<std::pair<int64_t, std::string>> range_scan(int64_t lo, int64_t hi) const {
-    std::vector<std::pair<int64_t, std::string>> results;
-    for (int64_t key : index_.range_scan_keys(lo, hi)) {
-      auto it = values_.find(key);
-      if (it != values_.end()) results.emplace_back(key, it->second);
-    }
-    return results;
+    return index_.range_scan(lo, hi);
   }
 
   // Number of log *entries* (PUT and DELETE combined) replayed on
@@ -95,7 +83,6 @@ class DurableStore {
 
  private:
   WriteAheadLog wal_;
-  GappedArray index_;
-  std::unordered_map<int64_t, std::string> values_;
+  RowArray index_;
   size_t recovered_entries_ = 0;
 };

@@ -42,6 +42,10 @@ g++ -O2 -std=c++17 -o cpp/executor_test cpp/executor_test.cpp && ./cpp/executor_
 
 # the SQL shell
 g++ -O2 -std=c++17 -o cpp/repl cpp/repl.cpp && ./cpp/repl
+
+# differential test against SQLite (Python standard library only)
+g++ -O2 -std=c++17 -o cpp/sql_harness cpp/sql_harness.cpp
+python3 python/sqlite_diff_test.py --runs 200
 ```
 
 The benchmarks build the same way, and each section below names the
@@ -892,3 +896,219 @@ not calling it an improvement.
 The Phase 7c adversarial test didn't show a change either, though
 single runs of it were too noisy to compare before and after. The
 multi-round medians in that section were measured after this fix.
+
+## Crash recovery in the write-ahead log
+
+Going back over the durability code turned up a bug in the one job a
+write-ahead log exists to do. Phase 5's replay already skipped a
+record that a crash had cut off partway through. What it didn't do was
+remove that record's bytes from the file. The log reopened in append
+mode, so the first write after the restart landed right behind the
+half-written record. On the restart after that, replay read the torn
+record's leftover bytes plus the start of the next record as if they
+were one complete record, and everything after that point was either
+lost or misread.
+
+Two smaller problems came with it. Records had no checksums, so a run
+of zero bytes at the end of the file, which some filesystems can leave
+behind after a crash, parsed as valid PUTs of key 0, and a damaged
+byte in the middle of the log was accepted as data. The value length
+was also trusted before being checked against the file, so a damaged
+length could make replay try to allocate gigabytes.
+
+I wrote the tests before touching the code. Each one writes a real log
+through `DurableStore`, damages the file, and restarts from it: cut
+the last 3 bytes off, restart, write, and restart again; append 64
+zero bytes; flip one byte in the middle; and point it at a file that
+isn't a log at all. That's five checks across four scenarios, and on
+the old code four of them failed. The only one that passed was
+dropping the torn record itself.
+
+The fix is in `write_ahead_log.h`. The file now starts with an 8-byte
+magic string, every record ends with a CRC-32 of its own bytes, and
+opening the log finds the last record that checks out and cuts the
+file back to it before anything new is written. Replay stops at the
+first bad record even if later bytes look fine, because nothing after
+a damaged record can be trusted to line up; that's the usual rule for
+write-ahead logs. A file that doesn't start with the magic string is
+refused and left alone, instead of being treated as one long torn
+record and truncated to nothing. Each record also goes out in a single
+`write()`, and if that fails partway the file is cut back, so a failed
+append can't leave half a record behind either.
+
+All five checks pass now, along with the other suites, and the
+durability demos still recover all of their data. Logs written by the
+old code can't be read by the new one; there were no real databases
+around to migrate, so I didn't write a converter. One gap is still
+open: after a new log file is created, its parent directory isn't
+fsync'd, which some filesystems need before the file itself is
+guaranteed to survive a crash.
+
+## Differential testing against SQLite
+
+Unit tests only cover the cases I thought of. To check the SQL layer
+more broadly, `python/sqlite_diff_test.py` generates random sequences
+of `CREATE TABLE`, `CREATE INDEX`, `INSERT`, `UPDATE`, `DELETE`, and
+`SELECT` (every `WHERE` form, `ORDER BY`, `LIMIT`, `COUNT(*)`, and
+`SUM`), plus simulated restarts. It runs each statement against this
+database, through a small line-based front end in
+`cpp/sql_harness.cpp`, and against an in-memory SQLite database, and
+compares the results. After every statement that changes data it also
+compares the full tables. When the two disagree, it shrinks the
+failing sequence by deleting statements for as long as the
+disagreement still shows up, and prints what's left.
+
+A few known differences are translated rather than reported. SQLite
+gets `INTEGER PRIMARY KEY` on the first column, and `INSERT OR
+REPLACE` / `UPDATE OR REPLACE` to match this database's overwrite
+behavior. `SUM` over zero rows counts as 0, since there's no NULL
+here. Values stay inside the documented key limits.
+
+It found two bugs in its first few runs. The first was that `LIMIT`
+got applied before `COUNT(*)` and `SUM` instead of to their result.
+On a 4-row table:
+
+```
+SELECT COUNT(*) FROM items LIMIT 3;
+  this db: [(3,)]
+  sqlite:  [(4,)]
+```
+
+`SUM(col) ... LIMIT 3` likewise added up only the first three rows.
+The fix moves `LIMIT` after the aggregate, so it applies to the one
+summary row.
+
+The second was a stale secondary index entry. An `INSERT` that reuses
+an existing primary key overwrites the row, but it only added the new
+index entry and never removed the old one. The shrunk reproduction:
+
+```
+CREATE TABLE items (id INT, label TEXT, qty INT);
+INSERT INTO items VALUES (30, 'n8', 1);
+CREATE INDEX idx_items_qty ON items(qty);
+UPDATE items SET qty = 14, label = 'n1';
+INSERT INTO items VALUES (30, 'n2', 20);
+SELECT SUM(qty) FROM items WHERE qty = 14;
+  this db: [(20,)]
+  sqlite:  [(0,)]
+```
+
+The row's qty is 20 by the end, but its old index entry for 14 was
+still there, so the index lookup found it anyway. `UPDATE ... SET id =
+X` had the same flaw when another row already had X: that row got
+overwritten, but its index entries stayed. The tester hadn't generated
+that case yet, because it only moved rows to unused ids. I fixed both
+paths and changed the generator to sometimes aim at an id that's
+already taken, so the second path gets exercised too.
+
+Both bugs have regression tests in `executor_test.cpp` now. The four
+new checks fail on the old executor and pass on the new one. After the
+fixes, 200 runs of 300 statements each, with nothing skipped, found no
+disagreements, and neither did 50 longer runs of 1,000 statements.
+
+The tester has limits of its own. It stays inside the documented key
+limits, so it never tries negative primary keys or indexed values of
+2^20 and up. Reading the code, values like that aren't rejected on the
+way in; the key packing just masks them. I haven't tested what that
+does to query results yet.
+
+## Rows stored in the learned index
+
+Until this change, the learned index wasn't actually where the data
+lived. `DurableStore` kept every row in a `std::unordered_map` and used
+the gapped array only to know which keys existed and in what order. A
+point lookup searched the learned index and then looked the key up in
+the hash map, which could have answered the question by itself. The
+index was only doing real work for range scans and ordered full scans.
+
+Now the gapped array stores a value next to each key.
+`BasicGappedArray<V>` keeps the values in a second array, parallel to
+the keys, and every slot move goes through one of two small helpers,
+so a value can't get left behind when its key shifts, is removed, or is
+redistributed by a local or full rebalance. `DurableStore` no longer
+has a hash map at all: `get`, `put`, `remove`, and `range_scan` all go
+through the learned index. The key-only `GappedArray` used by the
+Phase 3 and 7c benchmarks is the same template with an empty value
+type, and its value handling compiles out, so those benchmarks run the
+same code as before. The insert benchmark still triggers exactly the
+same rebalances (1,189 local and 195 full on the uniform set).
+
+A new storage test runs 30 randomized trials of inserts, overwrites,
+and removes against a `std::map`, half of them with eps = 4 so
+rebalances happen constantly, and checks every key's value at the end.
+Everything else still passes: 29/29 storage tests, 20/20 parser, 64/64
+executor, clean under AddressSanitizer and UBSan, and the SQLite
+differential test agrees across 200 runs of 300 statements and 50 runs
+of 1,000.
+
+I haven't measured what this does to lookup speed or memory yet. The
+numbers I have so far came from a laptop with too much else running to
+trust, so they'll go in with the other benchmark reruns.
+
+## Optimal segmentation
+
+The segmenter from Phase 2 pins each segment's line to the segment's
+first point. That keeps the math simple, but the best line for a run
+of points rarely passes exactly through the first one. On 1M lognormal
+keys spread over a wide key range, it needed 157 segments where
+PGM-index needed 126. (That isn't the "skewed" dataset from the
+earlier phases, which turned out to be almost entirely consecutive
+integers. A section on that will come with the benchmark reruns.)
+
+`build_optimal_segmented_model()` in `segmented_model.h` drops the
+pin. Each point (x, y) requires the line to pass through the vertical
+gap from y − eps to y + eps at x, and the lines that do that for every
+point so far form a convex region. Deciding whether the next point
+still fits only takes two lines from that region: the shallowest,
+which runs from the top of one gap down to the bottom of a later one,
+and the steepest, which runs from the bottom of one gap up to the top
+of a later one. A new point whose whole gap lies below the shallowest
+line or above the steepest one can't fit, so it starts a new segment.
+If the point only cuts into one of those lines, that line pivots onto
+a new endpoint, found by walking a convex hull of the earlier gap
+endpoints. This is O'Rourke's algorithm from 1981, the same one
+PGM-index is built on, and it runs in O(n) overall. Since any part of
+a run that fits also fits, starting a new segment only when forced
+gives the fewest segments possible. The fitting uses exact 128-bit
+integer arithmetic, so "fits" has no floating-point slack in it.
+
+To check it, a test compares it with a brute-force search on 400 small
+random inputs. The brute force tries every line through two gap
+endpoints, which is slow but obviously correct, and the two produce
+exactly the same segments every time. On the benchmark data the
+segment counts match PGM-index exactly:
+
+| data (1M keys) | eps | pinned | optimal | PGM-index |
+|---|---|---|---|---|
+| uniform | 64 | 79 | 57 | 57 |
+| wide-range lognormal | 64 | 157 | 126 | 126 |
+| uniform | 16 | 1,253 | 916 | 916 |
+| wide-range lognormal | 16 | 1,453 | 1,025 | 1,025 |
+
+That's 20–29% fewer segments, with every key still predicted within
+eps. The memory gap to PGM-index doesn't fully close (3,024 vs 2,192
+bytes on the lognormal keys at eps = 64), but what's left is
+representation rather than segmentation: my segments are 24 bytes, an
+int64 key and two doubles, and PGM-index stores its slope as a float.
+
+### Why the database doesn't use it
+
+I switched the gapped array to the optimal fit and then measured
+inserts. They got about 2.5x slower: roughly 60,000 ns per insert,
+against 22,000–25,000 with the pinned fit, across four back-to-back
+pairs. The cost is in fitting. Building a model for 1M keys took 21–34
+ms with the optimal version and 3–5 ms with the pinned one, and
+PGM-index's own builder took 17–19 ms, so most of that cost comes from
+the algorithm and some from my implementation. It matters because the
+gapped array refits its whole model on every full rebalance, and the
+Phase 3 benchmark triggers 195 of those per 100,000 inserts.
+
+In return, the database would have saved about 1 KB of segments (180
+instead of 235 on the lognormal keys) and maybe one comparison when
+finding a key's segment, since both fits predict within the same eps.
+That's not worth 2.5x on every insert, so the gapped array stays on
+the pinned fit, and the optimal version is for indexes that get built
+once and read many times. These timings came from a laptop with a lot
+running in the background, so treat them as rough, although the ratios
+held up across repeated runs. Lookup times for the optimal model are
+part of the benchmark reruns.

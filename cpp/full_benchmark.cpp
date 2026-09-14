@@ -96,6 +96,22 @@ void bench_one(const std::vector<int64_t>& keys, const std::string& dataset_name
     results.push_back({dataset_name, n, "segmented_index", ns, bytes});
   }
 
+  // the same lookup, with optimal segmentation instead of pinned anchors
+  {
+    const int64_t eps = 64;
+    SegmentedModel model = build_optimal_segmented_model(keys, eps);
+    auto t0 = std::chrono::steady_clock::now();
+    for (int64_t q : queries) {
+      int64_t val;
+      segmented_search(keys, model, q, val);
+      sink += val;
+    }
+    auto t1 = std::chrono::steady_clock::now();
+    double ns = std::chrono::duration<double, std::nano>(t1 - t0).count() / num_queries;
+    size_t bytes = model.segments.size() * sizeof(Segment) + sizeof(SegmentedModel);
+    results.push_back({dataset_name, n, "segmented_optimal", ns, bytes});
+  }
+
   if (sink == 123456789) std::printf("%lld", static_cast<long long>(sink));  // keep sink genuinely used
 }
 

@@ -264,6 +264,14 @@ int main() {
     auto res = run("SELECT SUM(name) FROM users;");
     check(!res.success, "SUM on a TEXT column is rejected");
   }
+  {
+    auto full = run("SELECT COUNT(*) FROM users;");
+    auto limited = run("SELECT COUNT(*) FROM users LIMIT 3;");
+    check(limited.rows.size() == 1 && limited.rows[0][0].int_val == full.rows[0][0].int_val,
+          "LIMIT applies to COUNT(*)'s result row, not to the rows being counted");
+    auto zero = run("SELECT COUNT(*) FROM users LIMIT 0;");
+    check(zero.success && zero.rows.empty(), "COUNT(*) ... LIMIT 0 returns no rows");
+  }
 
   // Secondary index: create on an existing table (must backfill)
   {
@@ -335,6 +343,27 @@ int main() {
       if (row[0].int_val == 9001) still_present = true;
     }
     check(!still_present, "DELETE removes the entry from the secondary index too");
+  }
+  // Overwriting a row, by INSERTing its primary key again or by moving
+  // another row onto its key, has to take its old index entries with it.
+  auto index_has = [&](int64_t age, int64_t id) {
+    for (auto& row : run("SELECT * FROM users WHERE age = " + std::to_string(age) + ";").rows) {
+      if (row[0].int_val == id) return true;
+    }
+    return false;
+  };
+  {
+    run("INSERT INTO users VALUES (7001, 'before', 61);");
+    run("INSERT INTO users VALUES (7001, 'after', 62);");
+    check(!index_has(61, 7001) && index_has(62, 7001),
+          "INSERT over an existing primary key replaces its secondary index entry");
+  }
+  {
+    run("INSERT INTO users VALUES (7002, 'mover', 63);");
+    run("INSERT INTO users VALUES (7003, 'displaced', 64);");
+    run("UPDATE users SET id = 7003 WHERE id = 7002;");
+    check(!index_has(64, 7003) && index_has(63, 7003) && !index_has(63, 7002),
+          "UPDATE onto another row's primary key removes that row's index entries");
   }
 
   // durability: the index itself has to survive a restart, not just

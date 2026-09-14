@@ -44,6 +44,17 @@ void run_comparison(const std::vector<int64_t>& keys, const std::string& name) {
   size_t ours_bytes = ours.segments.size() * sizeof(Segment);
   size_t ours_segments = ours.segments.size();
 
+  // ours again, with optimal segmentation instead of pinned anchors
+  SegmentedModel optimal = build_optimal_segmented_model(keys, eps);
+  bool optimal_correct = true;
+  double optimal_ns = time_lookups(queries, [&](int64_t q) -> int64_t {
+    int64_t val;
+    if (!segmented_search(keys, optimal, q, val)) optimal_correct = false;
+    return val;
+  });
+  size_t optimal_bytes = optimal.segments.size() * sizeof(Segment);
+  size_t optimal_segments = optimal.segments.size();
+
   // real PGM-index, same epsilon
   pgm::PGMIndex<int64_t, 64> pgm_index(keys);
   bool pgm_correct = true;
@@ -69,15 +80,19 @@ void run_comparison(const std::vector<int64_t>& keys, const std::string& name) {
   });
 
   std::printf("== %s (%zu keys, eps=%lld) ==\n", name.c_str(), n, static_cast<long long>(eps));
-  std::printf("  correctness  -- ours: %s, PGM-index: %s, PGM (no recursion): %s\n", ours_correct ? "pass" : "FAIL",
-              pgm_correct ? "pass" : "FAIL", pgm_nr_correct ? "pass" : "FAIL");
-  std::printf("  latency      -- ours: %8.1f ns/lookup   PGM-index: %8.1f ns/lookup   PGM (no recursion): %8.1f ns/lookup\n",
-              ours_ns, pgm_ns, pgm_nr_ns);
-  std::printf("  segments     -- ours: %8zu             PGM-index: %8zu\n", ours_segments, pgm_segments);
-  std::printf("  memory       -- ours: %8zu bytes       PGM-index: %8zu bytes\n\n", ours_bytes, pgm_bytes);
+  std::printf("  correctness  -- ours (pinned): %s   ours (optimal): %s   PGM-index: %s   PGM (no recursion): %s\n",
+              ours_correct ? "pass" : "FAIL", optimal_correct ? "pass" : "FAIL", pgm_correct ? "pass" : "FAIL",
+              pgm_nr_correct ? "pass" : "FAIL");
+  std::printf("  latency      -- ours (pinned): %7.1f   ours (optimal): %7.1f   PGM-index: %7.1f   PGM (no recursion): %7.1f  ns/lookup\n",
+              ours_ns, optimal_ns, pgm_ns, pgm_nr_ns);
+  std::printf("  segments     -- ours (pinned): %7zu   ours (optimal): %7zu   PGM-index: %7zu\n", ours_segments,
+              optimal_segments, pgm_segments);
+  std::printf("  memory       -- ours (pinned): %7zu   ours (optimal): %7zu   PGM-index: %7zu  bytes\n\n", ours_bytes,
+              optimal_bytes, pgm_bytes);
 
   std::ofstream csv("results/phase7b_pgm_comparison.csv", std::ios::app);
   csv << name << "," << n << ",ours," << ours_ns << "," << ours_bytes << "," << ours_segments << "\n";
+  csv << name << "," << n << ",ours_optimal," << optimal_ns << "," << optimal_bytes << "," << optimal_segments << "\n";
   csv << name << "," << n << ",pgm_index," << pgm_ns << "," << pgm_bytes << "," << pgm_segments << "\n";
   csv << name << "," << n << ",pgm_index_norecursive," << pgm_nr_ns << ",," << "\n";
 }

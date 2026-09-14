@@ -19,6 +19,12 @@ std::vector<int64_t> gen_uniform(size_t n, uint64_t seed) {
   return keys;
 }
 
+// Skewed keys are scaled so the largest lands at 1e15. They used to be
+// scaled to n * 10 like the uniform set, which crammed nearly every
+// lognormal draw into a few hundred integers; the nudge below then
+// turned those into one long run of consecutive integers, which a
+// single line fits exactly. See the comment in data_gen.py and the
+// README section on the skewed dataset.
 std::vector<int64_t> gen_skewed(size_t n, uint64_t seed) {
   std::mt19937_64 rng(seed);
   std::lognormal_distribution<double> dist(0.0, 2.0);
@@ -30,7 +36,7 @@ std::vector<int64_t> gen_skewed(size_t n, uint64_t seed) {
   std::vector<int64_t> keys(n);
   int64_t last = -1;
   for (size_t i = 0; i < n; i++) {
-    int64_t v = static_cast<int64_t>(raw[i] * (static_cast<double>(n) * 10.0 / max_raw));
+    int64_t v = static_cast<int64_t>(raw[i] * (1e15 / max_raw));
     if (v <= last) v = last + 1;
     keys[i] = v;
     last = v;
