@@ -16,18 +16,26 @@ joins, no multi-statement transactions, and no concurrent access.
 
 ## Results at a glance
 
-Every number here came from an actual run, on 1M keys unless noted.
-The section in parentheses has the details.
+Every number here came from an actual run on 1M keys, all in one
+session on an otherwise idle machine, and each is the median of five
+runs for lookups and three for everything else. The sections below
+have the details and the individual runs.
 
 | | result |
 |---|---|
-| Point lookup, skewed keys | 26.9 ns, vs 336.1 ns for a B+-tree and 219.1 ns for binary search (7a) |
-| Point lookup, uniform keys | 147.9 ns, vs 330.1 ns for a B+-tree and 220.7 ns for binary search (7a) |
-| Index memory | 0.000–0.002 bytes/key, vs about 37.3 for the B+-tree (7a) |
-| Inserts | 19,638 ns/insert, about 15.5x faster than shifting a sorted vector (3) |
-| Against the published PGM-index | slower on uniform data (154.7 vs 125.6 ns), about 2x faster on skewed (47.6 vs 104.0 ns) (7b) |
-| Learned Bloom filter | lost badly: 50.4% false positives vs 1.021% for a classic one (6a) |
-| Secondary index | 18–22x faster than a full scan for the same query (stretch goals) |
+| Point lookup, uniform keys | 113.6 ns, vs 301.7 ns for a B+-tree and 178.7 ns for binary search |
+| Point lookup, skewed keys | 117.7 ns, vs 319.1 ns for a B+-tree and 185.2 ns for binary search |
+| The same lookup inside the database | 142.0 ns (uniform), 147.3 ns (skewed), through the gapped array the database really uses |
+| Index memory | 0.001–0.010 bytes/key, vs about 37.3 for the B+-tree |
+| Inserts | 20,211 ns/insert, about 12x faster than shifting a sorted vector |
+| Against the published PGM-index | slower on uniform data (124.0 vs 89.5 ns), a tie on skewed (116.7 vs 114.0 ns) |
+| Learned Bloom filter | lost badly: 50.4% false positives vs 1.021% for a classic one |
+| Secondary index | 18–22x faster than a full scan for the same query |
+| Checkpointing | opening a store dropped from 9.12 ms to 0.48 ms |
+
+An earlier version of this table led with 26.9 ns on "skewed" data,
+which turned out to be an artifact of the dataset generator. See "The
+skewed dataset wasn't skewed" at the end.
 
 ## Building and running
 
@@ -87,6 +95,11 @@ g++ -O2 -std=c++17 -o cpp/benchmark cpp/benchmark.cpp
 |---|---|---|
 | uniform | 218.6 ns/lookup | 309.4 ns/lookup |
 | skewed  | 215.7 ns/lookup | 296.4 ns/lookup |
+
+*(Every "skewed" number in this file up to Phase 7c came from a
+dataset generator that wasn't producing skewed data. See "The skewed
+dataset wasn't skewed" at the end for what it was really generating,
+and what each affected result becomes once it's fixed.)*
 
 **The interesting part: plain binary search beat the B+-tree here.**
 This isn't a bug — it's the actual motivating fact behind learned
@@ -152,6 +165,11 @@ faster** than it. Three cheap-to-search lines did what one line
 structurally couldn't — this is Phase 2's whole thesis, borne out in
 a real, verified number instead of a theoretical claim.
 
+*Rerun later on genuinely skewed keys: 151 segments, not 3, and
+117.7 ns rather than 25.7. The thesis survives — a single line manages
+only 207.8 ns on that data — but the 8x margin doesn't. See the last
+section.*
+
 ## Phase 3 — inserts via a gapped array
 
 `cpp/gapped_array.h` spreads real keys across an array larger than
@@ -208,6 +226,11 @@ drift that spills across a segment boundary.
 global-only version — from a change that didn't touch correctness at
 all, only *how much* gets rebuilt when drift is detected. Verified
 correct for all 1,000,000 keys both before and after the change.
+
+*Rerun on the machine everything else in this file was measured on:
+20,211 ns/insert against 245,941 for the naive vector, so about 12x
+rather than 15.5x. The rebalance counts are identical every run (1,189
+local + 195 full), since they don't depend on timing.*
 
 ## Phase 4 — correctness test suite
 
@@ -276,6 +299,14 @@ almost the entirety of that cost (measured independently at ~113μs
 per call earlier). This is exactly why real databases batch multiple
 writes into one fsync ("group commit") instead of syncing after every
 single one — not implemented here, but worth knowing why it exists.
+
+Running the same demo later on a different machine made that point
+harder than the 36x does. On WSL's ext4 it reported 1,926,085 ns per
+durable put against 2,702 ns for a plain insert: a **713x** overhead,
+because one fsync there costs about 1.9 ms instead of ~113 μs. Not a
+line of code changed between those two runs. The overhead is a
+property of the storage stack underneath, which is worth remembering
+before quoting any single durability multiplier.
 
 ## Phase 6a — learned Bloom filter (a genuine negative result)
 
@@ -366,6 +397,13 @@ orders of magnitude smaller — because its memory scales with segment
 paper's other headline claim, now demonstrated with our own numbers
 across a real size range instead of asserted.
 
+*The memory result is the one thing here the flawed skewed data
+didn't flatter: on genuinely skewed keys the index needs more
+segments, so the range becomes 0.001–0.010 bytes/key against the same
+37.3. Still three to four orders of magnitude. The rerun's 1M numbers:
+segmented 128.5 ns (uniform) and 121.1 ns (skewed), against 301.1 and
+322.2 for the B+-tree.*
+
 **Speed**, consistent across all three sizes:
 
 | n | binary search | B+-tree | learned (Phase 1) | segmented (Phase 2) |
@@ -408,6 +446,12 @@ same 1M-key datasets, same `eps=64`.
 |---|---|---|---|
 | uniform | 154.7 ns, 79 segments, 1,896 bytes | **125.6 ns**, 57 segments, 984 bytes | 155.7 ns |
 | skewed | **47.6 ns**, 2 segments, 48 bytes | 104.0 ns, 2 segments, 104 bytes | 93.0 ns |
+
+*That skewed row is the flawed dataset, and "2 segments" is the
+giveaway. On genuinely skewed keys it's 157 segments and a tie:
+116.7 ns against PGM-index's 114.0. PGM stays ahead on uniform data,
+89.5 vs 124.0 ns. The explanation below still holds, but the 2x win
+doesn't. See the last section.*
 
 **A genuinely mixed, honest result — not a clean win either way.**
 On uniform data, the real implementation wins on every axis: fewer,
@@ -452,27 +496,28 @@ slowdowns of up to about 20%, which gives a rough yardstick.
 
 The first version of this test ran each scenario once. It reported
 +13.6% for the 1.2% window, with the slowdown growing steadily as the
-window shrank. When I reran it later on a different machine, single
-runs of the 1.2% window came back anywhere between −7% and +38%, so
-one run per scenario couldn't separate the effect from ordinary
-timing noise. The test now runs every scenario 9 times, interleaved
-so that drift in machine state hits all of them about equally, and
-compares each adversarial run against the benign run from the same
-round. Two separate 9-round runs:
+window shrank. Rerunning it later on a busy laptop, single runs of the
+1.2% window came back anywhere between −7% and +38%, so one run per
+scenario couldn't separate the effect from ordinary timing noise. The
+test now runs every scenario 9 times, interleaved so that drift in
+machine state hits all of them about equally, and compares each
+adversarial run against the benign run from the same round. Two
+9-round runs on an idle machine:
 
-| scenario | local rebalances | full rebalances | median slowdown, run 1 | median slowdown, run 2 |
-|---|---|---|---|---|
-| benign (scattered) | 0 | 195 | — | — |
-| 5.0% window | 231 | 195 | +4.1% | −0.9% |
-| 2.0% window | 792 | 195 | +8.8% | −4.2% |
-| 1.2% window | 1,096 | 189 | +15.6% | +15.0% |
+| scenario | local rebalances | full rebalances | median ns/insert, run 1 | run 2 | slowdown |
+|---|---|---|---|---|---|
+| benign (scattered) | 0 | 195 | 13,887.6 | 13,507.2 | — |
+| 5.0% window | 231 | 195 | 14,638.1 | 13,160.9 | +1.6%, −1.3% |
+| 2.0% window | 792 | 195 | 14,923.5 | 13,801.4 | +5.0%, +2.2% |
+| 1.2% window | 1,096 | 189 | 15,453.1 | 15,107.4 | +11.7%, +9.9% |
 
-The 1.2% window is the only result here I'd trust. Its median came
-out around 15% both times, close to the original 13.6%. Individual
-rounds still varied a lot (from −17% to +51% across all 18), so 15%
-is a typical cost, not a fixed one. The 5% and 2% windows showed no
-consistent effect: slower in one run, faster in the other. The
-"steady escalation" in the original single-run table was noise.
+On a quiet machine the effect is consistent, and it does grow as the
+window narrows. The tightest window costs about 10–12% both times,
+close to the original 13.6%. The 2% window costs a couple of percent,
+and the 5% window is indistinguishable from nothing. An earlier pass
+at this on a loaded laptop couldn't see any of that: the 5% and 2%
+windows came out slower in one run and faster in the next, which is
+what a noisy machine does to a small effect.
 
 The rebalance counts don't depend on timing, and they tell a clearer
 story. As the window narrows, local rebalances go from 0 to 1,096
@@ -481,7 +526,7 @@ the tightest window. Phase 3's per-segment rebalancing soaks up
 nearly all of the concentrated pressure, so the attack never gets
 the expensive whole-array rebuilds it's aiming for. Local rebalances
 still cost something, and at the tightest window there are enough of
-them to add up to roughly 15%. That resilience was a side effect,
+them to add up to roughly 10%. That resilience was a side effect,
 since per-segment rebalancing was only added to make ordinary inserts
 faster.
 
@@ -1041,9 +1086,32 @@ executor, clean under AddressSanitizer and UBSan, and the SQLite
 differential test agrees across 200 runs of 300 statements and 50 runs
 of 1,000.
 
-I haven't measured what this does to lookup speed or memory yet. The
-numbers I have so far came from a laptop with too much else running to
-trust, so they'll go in with the other benchmark reruns.
+`cpp/benchmark_db_lookups.cpp` times the path the database actually
+takes, next to the same baselines. Medians of five passes of 200,000
+lookups, on 900k keys, then again after inserting 100k more:
+
+| | uniform, fresh | uniform, after inserts | skewed, fresh | skewed, after |
+|---|---|---|---|---|
+| binary search | 168.0 ns | 178.2 ns | 171.9 ns | 175.5 ns |
+| B+-tree | 285.5 ns | 291.6 ns | 283.5 ns | 281.6 ns |
+| Phase 2 model, dense read-only array | 110.1 ns | 122.0 ns | 117.4 ns | 134.7 ns |
+| gapped array, what the database uses | 162.5 ns | 142.0 ns | 139.3 ns | 147.3 ns |
+
+So a lookup in the database runs about 1.9–2.0x faster than the
+B+-tree and a little faster than binary search, but 20–40% slower
+than the read-only Phase 2 structure the headline numbers come from.
+That difference is what the gaps and the correction walk cost, and
+it's the honest answer to "how fast is a lookup in this database", as
+opposed to "how fast is the index it's built on". Lookups for keys
+that aren't there cost about the same as hits (143.3 ns uniform,
+144.9 ns skewed, freshly built).
+
+One result there I can't explain yet: on uniform data the freshly
+built structure was slower than the same structure after 100,000
+inserts, 162.5 against 142.0 ns. Inserts trigger rebalances that refit
+the model, so the post-insert layout may simply predict better, but I
+haven't confirmed that. I also haven't measured what moving rows out
+of the hash map did to memory.
 
 ## Optimal segmentation
 
@@ -1051,9 +1119,10 @@ The segmenter from Phase 2 pins each segment's line to the segment's
 first point. That keeps the math simple, but the best line for a run
 of points rarely passes exactly through the first one. On 1M lognormal
 keys spread over a wide key range, it needed 157 segments where
-PGM-index needed 126. (That isn't the "skewed" dataset from the
-earlier phases, which turned out to be almost entirely consecutive
-integers. A section on that will come with the benchmark reruns.)
+PGM-index needed 126. (That isn't the "skewed" dataset the earlier
+phases used, which turned out to be almost entirely consecutive
+integers — see "The skewed dataset wasn't skewed" at the end. This is
+the corrected generator, which is what "skewed" means from there on.)
 
 `build_optimal_segmented_model()` in `segmented_model.h` drops the
 pin. Each point (x, y) requires the line to pass through the vertical
@@ -1093,25 +1162,30 @@ int64 key and two doubles, and PGM-index stores its slope as a float.
 
 ### Why the database doesn't use it
 
-I switched the gapped array to the optimal fit and then measured
-inserts. They got about 2.5x slower: roughly 60,000 ns per insert,
-against 22,000–25,000 with the pinned fit, across four back-to-back
-pairs. The cost is in fitting. Building a model for 1M keys took 21–34
-ms with the optimal version and 3–5 ms with the pinned one, and
-PGM-index's own builder took 17–19 ms, so most of that cost comes from
-the algorithm and some from my implementation. It matters because the
-gapped array refits its whole model on every full rebalance, and the
-Phase 3 benchmark triggers 195 of those per 100,000 inserts.
+I switched the gapped array to the optimal fit and measured inserts.
+They got about 2.7x slower: 56,623 and 56,878 ns per insert, against
+20,252 and 21,006 with the pinned fit, in alternating runs. The cost
+is in fitting. Building a model for 1M keys takes 21.8 ms with the
+optimal version against 3.5 ms pinned, and PGM-index's own builder
+takes 17.4 ms, so most of that cost belongs to the algorithm and a
+little to my implementation. It matters here because the gapped array
+refits its whole model on every full rebalance, and the Phase 3
+benchmark triggers 195 of those per 100,000 inserts.
 
 In return, the database would have saved about 1 KB of segments (180
 instead of 235 on the lognormal keys) and maybe one comparison when
 finding a key's segment, since both fits predict within the same eps.
-That's not worth 2.5x on every insert, so the gapped array stays on
+That isn't worth 2.7x on every insert, so the gapped array stays on
 the pinned fit, and the optimal version is for indexes that get built
-once and read many times. These timings came from a laptop with a lot
-running in the background, so treat them as rough, although the ratios
-held up across repeated runs. Lookup times for the optimal model are
-part of the benchmark reruns.
+once and read many times.
+
+Lookups bear that out. In the 7b comparison the optimal model ran at
+111.9 ns on uniform data against 124.0 for the pinned one, and 117.5
+against 116.7 on skewed. In the 7a sweep the two were within a few ns
+of each other at every size (120.0 vs 128.5 ns at 1M uniform, 186.6
+vs 187.8 at 5M skewed). Fewer segments didn't buy a lookup win worth
+claiming. What they bought is memory: 1,368 bytes against 1,896 on
+uniform, and 3,024 against 3,768 on skewed.
 
 ## Input validation
 
@@ -1205,16 +1279,17 @@ the store from the full log, and again after a checkpoint:
 
 | | on disk | opening the store (median of 5) |
 |---|---|---|
-| before the checkpoint | 1,508,908-byte log | 9.78 ms, replaying 20,000 records |
-| after the checkpoint | 140,910-byte snapshot, empty log | 0.49 ms, loading 2,000 rows |
+| before the checkpoint | 1,508,908-byte log | 9.12 ms, replaying 20,000 records |
+| after the checkpoint | 140,910-byte snapshot, empty log | 0.48 ms, loading 2,000 rows |
 
-Opening got about 20x faster, and every row came back with its latest
-value both times. A second run gave 10.74 ms against 0.46 ms. The gap
-depends on how many updates have piled up, since the log grows with
-every write while the snapshot stays the size of the data. One thing I
-learned running it: WSL's `/tmp` is a tmpfs, where fsync does nothing,
-so building the store there took almost no time. On the ext4 home
-directory it took 39.8 s, about 2 ms per fsync.
+Opening got about 19x faster, and every row came back with its latest
+value both times. Two earlier runs gave 9.78 against 0.49 ms and 10.74
+against 0.46 ms, so the ratio is stable. The gap depends on how many
+updates have piled up, since the log grows with every write while the
+snapshot stays the size of the data. One thing I learned running it:
+WSL's `/tmp` is a tmpfs, where fsync does nothing, so building the
+store there took no measurable time at all. On the ext4 home directory
+the same 20,000 writes took 41.7 s, about 2 ms per fsync.
 
 ## Building with make, and CI
 
@@ -1228,3 +1303,55 @@ runs of the SQLite differential test. The badge at the top of this
 file shows how the latest run went. CI doesn't run the benchmarks,
 since timings from shared machines would be too noisy to mean
 anything.
+
+## The skewed dataset wasn't skewed
+
+While starting a writeup I finally looked at what the "skewed" dataset
+actually contained, and it wasn't skewed at all. `gen_skewed` drew
+from a lognormal distribution and scaled the draws so the largest one
+landed at n * 10. With sigma = 2 the largest draw is thousands of
+times bigger than a typical one, so almost every draw floored into the
+same few hundred integers, and the loop that nudges collisions up by
+one turned those into a single run of consecutive integers: 999,819 of
+the 1,000,000 keys, 99.98% of gaps exactly 1, followed by 181 sparse
+tail keys.
+
+A straight line fits a run of consecutive integers exactly. That's why
+"skewed" data needed 2 or 3 segments where uniform data needed 84, and
+why it produced the best number in the project, 26.9 ns per lookup.
+The measurement was real. It just measured the generator instead of
+skew.
+
+The fix is one line in each generator (`python/data_gen.py` and
+`cpp/key_generators.h`): scale so the largest draw lands at 1e15
+rather than n * 10, which leaves room for nearly every draw to get its
+own integer. Gaps of exactly 1 went from 99.98% of the data to 0.001%.
+
+Then I reran every benchmark on an otherwise idle machine. What the
+corrected data does to the claims:
+
+| | flawed "skewed" data | genuinely skewed data |
+|---|---|---|
+| segments needed (eps = 64) | 2–3 | 151 |
+| segmented lookup | 26.9 ns | 117.7 ns |
+| against the B+-tree | 336.1 ns, so 12.5x | 319.1 ns, so 2.7x |
+| against binary search | 219.1 ns, so 8.1x | 185.2 ns, so 1.6x |
+| against PGM-index | 47.6 vs 104.0 ns, a 2x win | 116.7 vs 114.0 ns, a tie |
+
+What survives: the learned index still beats the B+-tree on both
+distributions by about 2.7x, index memory is still three to four
+orders of magnitude smaller (0.001–0.010 bytes/key against 37.3), and
+Phase 2's thesis holds up, since a single line manages only 207.8 ns
+on genuinely skewed keys where segmentation gets 117.7.
+
+What doesn't: the 26.9 ns headline, "12.5x faster than a B+-tree", and
+"about 2x faster than PGM-index on skewed data". On real skewed keys
+this index and PGM-index are within a few percent of each other, and
+PGM is clearly ahead on uniform data (89.5 vs 124.0 ns).
+
+The phase sections above still show the numbers they were written
+with, since they're a log of what was measured at the time, and each
+affected one now says where its skewed figure came from. The lesson I
+took from this: I checked the results constantly and never checked the
+input. One look at the gap distribution would have caught it at Phase
+0, and it's a one-line check.
