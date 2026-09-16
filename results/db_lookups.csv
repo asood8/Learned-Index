@@ -1,0 +1,16 @@
+data/uniform_1000000.bin,fresh,binary search,167.971,171.803
+data/uniform_1000000.bin,fresh,B+-tree,285.506,286.911
+data/uniform_1000000.bin,fresh,Phase 2 model, dense array,110.137,123.122
+data/uniform_1000000.bin,fresh,gapped array (what the db uses),162.497,143.315
+data/uniform_1000000.bin,after_inserts,binary search (rebuilt array),178.152,-1
+data/uniform_1000000.bin,after_inserts,B+-tree,291.624,-1
+data/uniform_1000000.bin,after_inserts,Phase 2 model (rebuilt),122.028,-1
+data/uniform_1000000.bin,after_inserts,gapped array (what the db uses),142.043,-1
+data/skewed_1000000.bin,fresh,binary search,171.913,174.342
+data/skewed_1000000.bin,fresh,B+-tree,283.542,286.353
+data/skewed_1000000.bin,fresh,Phase 2 model, dense array,117.366,121.749
+data/skewed_1000000.bin,fresh,gapped array (what the db uses),139.29,144.944
+data/skewed_1000000.bin,after_inserts,binary search (rebuilt array),175.493,-1
+data/skewed_1000000.bin,after_inserts,B+-tree,281.562,-1
+data/skewed_1000000.bin,after_inserts,Phase 2 model (rebuilt),134.743,-1
+data/skewed_1000000.bin,after_inserts,gapped array (what the db uses),147.302,-1
