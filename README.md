@@ -2,69 +2,66 @@
 
 [![tests](https://github.com/asood8/Learned-Index/actions/workflows/tests.yml/badge.svg)](https://github.com/asood8/Learned-Index/actions/workflows/tests.yml)
 
-An embedded SQL database in C++17 whose storage engine is a learned
-index rather than a B-tree. To find a key, it evaluates a small
-piecewise-linear model that predicts where the key sits in a sorted
-array, then walks a short distance from that guess to the exact slot.
-There is no tree to descend and no pointers to chase.
+This is an embedded SQL database written in C++17. The storage engine is
+a learned index instead of a B-tree. To find a key, it uses a small
+model, made of a few straight lines, to guess where the key is in a
+sorted array, and then checks the nearby slots until it finds the right
+one.
 
-The design follows Kraska et al., "The Case for Learned Index
-Structures" (2018), and borrows from PGM-index for error-bounded
-segmentation and from ALEX for handling inserts. The published
-PGM-index is vendored here as a benchmark opponent, so the comparisons
-are against a real implementation rather than a strawman.
+The design is based on Kraska et al., "The Case for Learned Index
+Structures" (2018), with ideas from two later projects: PGM-index (how
+to split the data into pieces) and ALEX (how to handle inserts). I also
+included the published PGM-index in the repo so I could benchmark
+against a real implementation, not just my own baselines.
 
-It is embedded in the same sense SQLite is: one process, one
-write-ahead log on disk, and a SQL front end over a storage engine.
-There are no joins, no multi-statement transactions, and no concurrent
-access. Within those limits it is a working database — `CREATE TABLE`,
-`INSERT`, `SELECT` with `WHERE`/`ORDER BY`/`LIMIT`/`COUNT`/`SUM`,
-`UPDATE`, `DELETE`, secondary indexes, `EXPLAIN`, crash recovery,
-checkpointing, and a REPL.
+"Embedded" means the same thing it does for SQLite: a single process, a
+write-ahead log on disk, and a SQL layer on top of the storage engine.
+It doesn't support joins, multi-statement transactions, or concurrent
+access. It does support `CREATE TABLE`, `INSERT`, `SELECT` (with
+`WHERE`, `ORDER BY`, `LIMIT`, `COUNT` and `SUM`), `UPDATE`, `DELETE`,
+secondary indexes, `EXPLAIN`, crash recovery, checkpointing, and a REPL.
 
 ## Results
 
-Every number comes from an actual run on 1M keys, measured in one
-sitting on an otherwise idle machine. Lookup figures are medians of
-five runs, the rest medians of three.
+All of these are from real runs on 1M keys, done in one session on a
+machine with nothing else running. Lookup times are the median of five
+runs, and everything else is the median of three.
 
 | | result |
 |---|---|
-| Point lookup, uniform keys | 113.6 ns, against 301.7 ns for a B+-tree and 178.7 ns for binary search |
-| Point lookup, skewed keys | 117.7 ns, against 319.1 ns and 185.2 ns |
-| The same lookup inside the database | 142.0 ns (uniform), 147.3 ns (skewed), through the gapped array the database really uses |
-| Index memory | 0.001–0.010 bytes per key, against about 37.3 for the B+-tree |
-| Inserts | 20,211 ns, about 12x faster than shifting a sorted vector |
-| Against the published PGM-index | slower on uniform data (124.0 vs 89.5 ns), a tie on skewed (116.7 vs 114.0 ns) |
+| Point lookup, uniform keys | 113.6 ns (B+-tree: 301.7 ns, binary search: 178.7 ns) |
+| Point lookup, skewed keys | 117.7 ns (B+-tree: 319.1 ns, binary search: 185.2 ns) |
+| The same lookup inside the database | 142.0 ns uniform, 147.3 ns skewed, using the gapped array the database actually runs on |
+| Index memory | 0.001–0.010 bytes per key, vs about 37.3 for the B+-tree |
+| Inserts | 20,211 ns, about 12x faster than inserting into a plain sorted vector |
+| vs. the published PGM-index | slower on uniform data (124.0 vs 89.5 ns), about even on skewed (116.7 vs 114.0 ns) |
 | Secondary index lookup | 18–22x faster than the full scan it replaces |
-| Checkpointing | opening a store dropped from 9.12 ms to 0.48 ms |
-| Learned Bloom filter | lost badly: 50.4% false positives against 1.021% for a classic one |
+| Checkpointing | startup time went from 9.12 ms to 0.48 ms |
+| Learned Bloom filter | lost badly: 50.4% false positives vs 1.021% for a normal one |
 
-Three things in that table are worth pulling out.
+A few notes on these.
 
-The index is roughly 2.7x faster than the B+-tree and needs three to
-four orders of magnitude less memory, which is the headline claim of
-the original paper reproduced on my own data. The memory difference is
-structural: a B+-tree pays about 37 bytes per key no matter how large
-it gets, while a piecewise-linear model pays per *segment*. A million
-uniform keys need 84 segments, so the whole model is a couple of
-kilobytes.
+The index is about 2.7x faster than my B+-tree and uses thousands of
+times less memory, which matches the main claim of the original paper.
+The memory gap comes from how each structure grows. A B+-tree costs
+roughly 37 bytes per key no matter how large it gets, while the model's
+size depends only on how many segments it needs. A million uniform keys
+need 84 segments, so the whole model is a couple of kilobytes.
 
-The database's own lookup path is slower than the index it is built
-on, 142.0 ns against 113.6, because live data needs gaps for inserts
-and a model that drifts between refits. That is the number I would
-quote for "how fast is a lookup in this database", and it is the
-number most write-ups of this kind never measure.
+Lookups inside the database are slower than lookups on the bare index
+(142.0 ns vs 113.6). The database has to leave empty slots in the array
+for inserts, and its model gets a little less accurate with every insert
+until it's rebuilt. I think 142.0 ns is the more honest number to quote,
+and it's one that most projects like this don't measure.
 
-The comparison against the real PGM-index is a mixed result rather
-than a win. PGM is clearly faster on uniform data and level with this
-index on skewed data, using fewer segments and less memory per
-segment. Details are below.
+The comparison with PGM-index didn't go my way. PGM is clearly faster on
+uniform data and about even on skewed data, and it uses fewer segments
+and less memory per segment. There's more on this below.
 
-## Try it
+## Building and running
 
-Everything is a single `.cpp` file under `cpp/`, built with g++
-(C++17). The Makefile wraps the usual tasks and puts binaries in
+Each program is a single `.cpp` file in `cpp/`, compiled with g++
+(C++17). The Makefile covers the common tasks and puts the binaries in
 `build/`.
 
 ```bash
@@ -74,11 +71,14 @@ make difftest    # differential test against SQLite
 make demos       # durability and catalog restart demos
 make repl        # build and start the SQL shell
 make data        # generate the benchmark datasets (needs numpy)
-make all         # everything, benchmarks included
+make all         # build everything, including benchmarks
 ```
 
-A session in the REPL, which is backed by a real write-ahead log, so
-closing and reopening it is a genuine restart:
+The write-ahead log uses POSIX calls like `fsync` and `ftruncate`, so it
+builds on Linux, or on Windows through WSL.
+
+Here's a short REPL session. The REPL uses a real write-ahead log, so
+closing and reopening it is an actual restart.
 
 ```
 db> CREATE TABLE users (id INT, name TEXT, age INT);
@@ -104,8 +104,8 @@ db> .exit
 bye.
 ```
 
-The tag after each result is the executor's actual routing decision.
-`EXPLAIN` goes further and reports what the model did:
+The tag after each result shows which access path the executor chose.
+`EXPLAIN` shows what the model actually did:
 
 ```
 db> EXPLAIN SELECT * FROM users WHERE id = 2;
@@ -120,71 +120,68 @@ db> EXPLAIN INSERT INTO users VALUES (4, 'x', 1);
 Parse error: EXPLAIN is only supported for SELECT statements
 ```
 
-"Predicted position 2, corrected in 3 probes" is the real prediction
-and the real number of slots examined, closer to `EXPLAIN ANALYZE`
-than to a plan sketch.
-
-The write-ahead log uses POSIX calls such as `fsync` and `ftruncate`,
-so the project builds on Linux, or on Windows through WSL.
+"Predicted position 2, corrected in 3 probes" is the model's real guess
+and the number of slots it really had to check, so it reports what
+actually happened, not just a plan.
 
 ## How it works
 
-### Predicting where a key lives
+### Predicting where a key is
 
-A sorted array of keys defines a function: given a key, return its
-position. Plot key against position and that function is the data's
-cumulative distribution, scaled. If the data is anywhere near regular,
-a straight line approximates it well, and a line costs one multiply
-and one add to evaluate — no pointer chasing, no cache misses walking
-down levels.
+If you plot each key in a sorted array against its position, you get a
+curve that always goes up. For fairly regular data, that curve is close
+to a straight line, and working out a point on a line takes one
+multiplication and one addition. A B-tree lookup has to go down several
+levels of nodes instead, and each step usually means waiting on memory
+(a cache miss).
 
-The catch is that a prediction is not an answer. The model says
-"around slot 1,400"; the key might be at 1,396. Every lookup therefore
-has two parts: predict, then correct. Correction is what makes the
-structure honest, and it is where the interesting failure modes live.
+A prediction isn't an exact answer, though. The model might say "about
+slot 1,400" when the key is really at 1,396, so every lookup has two
+steps: predict, then correct. Most of the bugs in this project ended up
+being in the correction step.
 
-Correction here is a walk. Starting at the predicted slot, step left
-while the slot to the left holds a key greater than or equal to the
-target (or is a gap), then step right past gaps and smaller keys. Take
-an array holding `[10, _, 20, 30, _, 40, 50, _]`, where `_` is a gap,
-and look for the first key at least 35 with a bad prediction of slot
-7. Walking left passes 50, then 40, then the gap, and stops at slot 3,
-which holds 30. Walking right from there skips the gap and lands on 40
-at slot 5. A prediction of slot 0 reaches the same answer from the
-other side.
+The correction is a short walk. Starting at the predicted slot, it moves
+left as long as the slot to its left is empty or holds a key greater
+than or equal to the target, then moves right past empty slots and
+smaller keys. For example, take the array
+`[10, _, 20, 30, _, 40, 50, _]`, where `_` is an empty slot, and search
+for the first key that's at least 35, starting from a bad prediction of
+slot 7. Walking left passes 50, 40 and the empty slot 4, then stops
+because slot 3 holds 30. Walking right from there skips the empty slot
+and stops at 40 in slot 5. Starting from slot 0 instead gets to the same
+place by walking right the whole way.
 
-The walk is correct no matter what the model says, because the array
-is sorted; the model only decides how far it has to walk. That
-property is worth more than it sounds, and the section on bugs below
-explains what happened when correctness depended on the model instead.
+Since the array is sorted, the walk finds the right answer no matter
+what the model predicted. The model only changes how far it has to go.
+That ended up mattering a lot, and the bugs section explains what
+happened back when correctness depended on the model.
 
-### Fitting the segments
+### Fitting segments
 
-One line over a whole dataset only works if the data is close to
-uniform. On the skewed set, a single least-squares line has a maximum
-error of 15.7M positions in an array of 1M keys, which means the
-"local" search covers the whole array and the model has bought
-nothing. Measured: 207.8 ns per lookup with one line, slower than
+A single line only works if the data is close to uniform. On the skewed
+dataset, the best single line is off by up to 15.7M positions in an
+array of 1M keys, so the "local" search ends up covering the whole
+array. In practice that's 207.8 ns per lookup, which is slower than
 plain binary search at 185.2 ns.
 
-So the model is piecewise. `build_segmented_model` walks the sorted
-keys once and extends a segment for as long as a single line can keep
-every point within ±eps of its true position (eps = 64 by default).
-When no valid slope remains, it closes the segment and starts another.
-Each new point turns into one interval constraint on the slope, so the
-whole fit is an intersection of intervals in a single O(n) pass. The
-result on 1M keys: 84 segments for uniform data, 151 for skewed, and
-lookups at 113.6 and 117.7 ns.
+So the model is split into pieces. `build_segmented_model` goes through
+the sorted keys once, extending the current segment as long as one line
+can keep every key within eps slots of its real position (eps is the
+allowed error, 64 by default). When no line fits anymore, it closes that
+segment and starts a new one. Because each segment's line has to start
+at the segment's first point, each new key just narrows down which
+slopes are still allowed, so building the whole model takes one pass
+over the data. On 1M keys this gives 84 segments for uniform data and
+151 for skewed, with lookups at 113.6 and 117.7 ns.
 
-That version pins each segment's line to the segment's first point,
-which keeps the math to one variable. It is not optimal. The file also
-contains `build_optimal_segmented_model`, which drops the pin and
-tracks the full set of lines that still fit — bounded by the
-shallowest and steepest line that satisfies every point so far, each
-pivoting on a convex hull of the error bounds as points arrive. That
-is O'Rourke's 1981 algorithm, the one PGM-index uses, and it finds the
-fewest segments possible. It needs 20–29% fewer segments than the
-pinned version and matches PGM-index's segment counts exactly:
+Pinning each line to its first point keeps things simple, but it doesn't
+give the fewest segments. `build_optimal_segmented_model` removes that
+restriction. It keeps track of every line that still fits the keys seen
+so far, by tracking the flattest and steepest lines that still work
+(with a convex hull), and updates them as each new key comes in. This is
+O'Rourke's algorithm from 1981, which PGM-index also uses, and it gives
+the minimum possible number of segments. It needs 20–29% fewer segments
+than the pinned version, and its counts match PGM-index exactly:
 
 | data (1M keys) | eps | pinned | optimal | PGM-index |
 |---|---|---|---|---|
@@ -193,110 +190,112 @@ pinned version and matches PGM-index's segment counts exactly:
 | uniform | 16 | 1,253 | 916 | 916 |
 | skewed | 16 | 1,453 | 1,025 | 1,025 |
 
-The database still uses the pinned version, for a measured reason:
-fitting optimally takes 21.8 ms per million keys against 3.5 ms, and
-the structure refits on every full rebalance, which made inserts 2.7x
-slower (56,623 ns against 20,252) in exchange for about 1 KB of saved
-segments. PGM's own fit takes 17.4 ms, so most of that cost belongs to
-the algorithm rather than to my implementation. Optimal segmentation
-is the right choice for an index built once and read many times, which
-is not this one.
+The database still uses the pinned version, because the optimal one
+costs too much here. Fitting 1M keys optimally takes 21.8 ms, compared
+to 3.5 ms pinned. The database refits its model on every full rebalance,
+so switching made inserts 2.7x slower (56,623 ns vs 20,252) and only
+saved about 1 KB of segments. PGM-index's own fitting code takes 17.4
+ms, so most of that cost comes from the algorithm itself, not my
+implementation. Optimal segmentation makes sense for an index that gets
+built once and then mostly read, and that isn't what this database does.
 
-### Making it updatable
+### Supporting inserts
 
-A sorted array is hostile to inserts: putting a key in the middle
-shifts everything after it. The storage engine is therefore a gapped
-array, about 70% full, with the free slots spread throughout. An
-insert usually lands in a nearby gap after shifting a handful of
-neighbours, and the model is left alone.
+Inserting into the middle of a sorted array means shifting everything
+after it. To avoid that, the storage engine uses a gapped array that's
+about 70% full, with the empty slots spread throughout. An insert
+usually lands in a nearby gap after moving a few neighbors, and the
+model doesn't need to change.
 
-Each insert nudges keys slightly away from where the model expects
-them. That drift is bounded by rebalancing: every segment counts the
-inserts that land in it, and once the count reaches eps, that
-segment's slice of the array is redistributed and refit. A much rarer
-whole-array rebalance runs as a safety net. On 1M keys with 100k
-inserts, that works out to 1,189 local rebalances and 195 full ones,
-and inserts cost 20,211 ns each against 245,941 for the naive
-shift-everything version.
+Each insert moves some keys slightly away from where the model expects
+them. To stop that from adding up, every segment counts the inserts that
+land in it, and once the count reaches eps, that part of the array gets
+spread out again and its model is rebuilt. A much less frequent
+rebalance of the whole array runs as a fallback. With 100k inserts into
+1M keys, that came to 1,189 local rebalances and 195 full ones. Inserts
+took 20,211 ns each, compared to 245,941 ns for a sorted vector that
+shifts everything over.
 
-### Surviving a crash
+### Crash recovery
 
-Every write is appended to a log and fsync'd before the in-memory
-structure is touched, so a process that dies mid-write comes back with
-the write either fully applied or not at all. Each record carries a
-type tag, the key, the value, and a CRC-32. Opening the log verifies
-it and truncates it back to the last intact record, which matters more
-than it sounds: an earlier version skipped a torn record but left its
-bytes in place, and the next writes landed behind them.
+Every write is saved to a log file first, and forced all the way to disk
+with `fsync`, before the data in memory changes, so if the process
+crashes in the middle of a write, that write is either fully there after
+a restart or not there at all. Each log record has a type tag, the key,
+the value, and a CRC-32 checksum. When the log is opened, it's checked
+and cut back to the last complete record. That second part fixed a real
+bug: an earlier version skipped over a half-written record but left its
+bytes in the file, and new writes got appended after them.
 
-Logs only grow, so there is also checkpointing. `checkpoint()` writes
-the whole store to a snapshot file and then empties the log. The
-ordering is what makes it safe: the snapshot goes to a temporary file,
-is fsync'd, is renamed into place, and only then is the log emptied. A
-crash between the rename and the truncation leaves a snapshot plus a
-log of writes it already contains, and replaying those changes
-nothing. Startup loads the snapshot in a single bulk layout and
-replays whatever the log has gathered since. For a store with 20,000
-logged updates, opening went from 9.12 ms to 0.48 ms.
+The log only grows, so there's also checkpointing. `checkpoint()` writes
+the whole store to a snapshot file and then empties the log. The order
+is what makes it safe to crash at any point. The snapshot is written to
+a temporary file, fsync'd, and renamed into place, and only then is the
+log cleared. If a crash happens between the rename and clearing the log,
+you're left with the new snapshot and a log of writes it already
+includes, and replaying those doesn't change anything. On startup, the
+snapshot is loaded in one pass and any newer log entries are replayed on
+top. For a store with 20,000 logged updates, startup went from 9.12 ms
+to 0.48 ms.
 
 ### The SQL layer
 
-The front end is a hand-written tokenizer and recursive-descent
-parser, an executor, and a catalog. Nothing here is generated.
+The SQL side is a hand-written tokenizer and recursive-descent parser,
+an executor, and a catalog. None of it is generated.
 
-The storage engine only knows `int64 -> bytes`, so every row's key
-packs a table id into the high 16 bits and the row's primary key into
-the low 48. Rows of one table stay contiguous and sorted, which is
-exactly what the segmented model likes. The catalog is a table like
-any other: table id 0 holds a row per table and per index, the same
-pattern as `sqlite_master`, and the catalog rebuilds itself on startup
-by range-scanning its own rows.
+The storage engine only maps `int64` keys to bytes, so each row's key
+combines a table id (the top 16 bits) with the row's primary key (the
+bottom 48). That keeps each table's rows together and in order, which
+suits the segmented model well. The catalog is just another table (table
+id 0) with one row per table and per index, similar to SQLite's
+`sqlite_master`. On startup it rebuilds itself by reading those rows
+back.
 
-The executor routes each query to the cheapest path the storage engine
-supports: equality on the primary key becomes a point lookup,
-`BETWEEN` on the primary key becomes a range scan, equality on an
-indexed column becomes a secondary index lookup, and anything else
-falls back to a full scan with in-memory filtering.
+The executor picks the cheapest path it can for each query. An equality
+check on the primary key becomes a point lookup, `BETWEEN` on the
+primary key becomes a range scan, an equality check on an indexed column
+uses the secondary index, and anything else is a full scan with
+filtering.
 
-Secondary indexes needed no new data structure. Indexed values repeat,
-while the learned index needs unique keys, so each index entry is a
-composite: the indexed value in the top 20 bits and the row's primary
-key in the low 28. Every entry is unique, all rows sharing a value sit
-in one contiguous range, and a lookup is a range scan over the same
-gapped array. On a 1,000-row table that is 18–22x faster than the full
-scan it replaces (6,376–7,745 ns against 134,959–155,267).
+Secondary indexes didn't need a new data structure. Indexed values can
+repeat, but the learned index needs unique keys, so each index entry
+combines the indexed value (top 20 bits) with the row's primary key
+(bottom 28 bits). That makes every entry unique and puts all rows with
+the same value next to each other, so a lookup is just a range scan on
+the same gapped array. On a 1,000-row table this was 18–22x faster than
+the full scan it replaced (6,376–7,745 ns vs 134,959–155,267 ns).
 
-Values are checked against their column before anything is written:
-types must match, primary keys must fit 48 bits (28 once a table has
-an index), and indexed values must fit 20 bits. Anything outside those
-ranges is refused rather than silently masked into a different key.
+Before anything gets written, values are checked against their columns.
+Types have to match, primary keys have to fit in 48 bits (28 once the
+table has an index), and indexed values have to fit in 20 bits. Anything
+out of range is rejected instead of being silently turned into a
+different key.
 
-## What the numbers say
+## Benchmarks
 
 ### Against a B+-tree and binary search
 
-The B+-tree here is a real one — order 64, node splitting, linked
-leaves — written specifically to be the baseline to beat.
+The B+-tree is one I wrote to use as the baseline (order 64, with node
+splitting and linked leaves).
 
 | 1M keys | binary search | B+-tree | one line | segmented |
 |---|---|---|---|---|
 | uniform | 178.7 ns | 301.7 ns | 118.3 ns | 113.6 ns |
 | skewed | 185.2 ns | 319.1 ns | 207.8 ns | 117.7 ns |
 
-Two details are more interesting than the headline. First, plain
-binary search beats the B+-tree, which surprises people and is the
-actual motivating fact behind learned indexes. This B+-tree is correct
-but not cache-optimized: each node is heap-allocated, so descending
-three or four levels means three or four jumps to scattered memory,
-each a likely cache miss, while binary search stays inside one
-contiguous block. The original paper reports the same thing. Second,
-the single-line model wins on uniform data and loses badly on skewed
-data, which is the entire argument for segmentation, visible in one
-row of a table.
+Besides the segmented column, two things in this table stand out. First,
+plain binary search beats the B+-tree. My B+-tree allocates each node
+separately, so going down three or four levels means three or four jumps
+to different places in memory, each one probably a cache miss. Binary
+search stays inside one block of memory. The original learned index
+paper makes the same observation, and it's a big part of why learned
+indexes are interesting in the first place. Second, the single-line
+model wins on uniform data and loses badly on skewed data, which is the
+whole reason for splitting it into segments.
 
-Scaling holds up. Across 100K, 1M and 5M keys, the segmented index
-stays ahead of both baselines, and the margin over the B+-tree grows:
-at 5M skewed keys it is 187.8 ns against 548.2.
+The results hold up as the data grows. From 100K to 5M keys, the
+segmented index stays ahead of both baselines, and the gap with the
+B+-tree gets wider: at 5M skewed keys it's 187.8 ns vs 548.2.
 
 ### Memory
 
@@ -306,40 +305,39 @@ at 5M skewed keys it is 187.8 ns against 548.2.
 | 1M | 37,347,776 bytes (37.3/key) | 1,928–3,800 bytes (0.002–0.004/key) |
 | 5M | 186,754,792 bytes (37.4/key) | 10,160–12,584 bytes (0.002–0.003/key) |
 
-The B+-tree's cost per key is flat because it is pointer and node
-overhead. The model's cost scales with segment count, not with the
-number of keys, which is why it stays in the kilobytes while the tree
-reaches 178 MB. Both exclude the sorted data itself, which every
-approach needs.
+The B+-tree's cost per key stays flat because it's mostly node and
+pointer overhead. The model's size depends on the number of segments,
+not the number of keys, so it stays in the kilobytes while the B+-tree
+grows to 178 MB. Neither number includes the sorted data itself, since
+every approach needs that anyway.
 
-### Against the published PGM-index
+### Against PGM-index
 
-`cpp/third_party/pgm/` holds the real PGM-index, vendored unmodified,
-benchmarked on the same data with the same eps.
+`cpp/third_party/pgm/` has the real PGM-index, unmodified. I ran it on
+the same data with the same eps.
 
-| 1M keys | ours (pinned) | ours (optimal) | PGM-index |
+| 1M keys | mine (pinned) | mine (optimal) | PGM-index |
 |---|---|---|---|
 | uniform | 124.0 ns, 79 segments, 1,896 bytes | 111.9 ns, 57 segments, 1,368 bytes | 89.5 ns, 57 segments, 984 bytes |
 | skewed | 116.7 ns, 157 segments, 3,768 bytes | 117.5 ns, 126 segments, 3,024 bytes | 114.0 ns, 126 segments, 2,192 bytes |
 
-PGM wins on uniform data and ties on skewed. Its remaining memory
-advantage at equal segment counts is representation rather than
-segmentation: 16 bytes per segment against 24 here, since it keeps a
-32-bit float slope where this project keeps a 64-bit double. Turning
-PGM's recursive routing layer off (a template parameter)
-moves its uniform time from 89.5 to 109.8 ns, which confirms the
-hierarchy is doing real work rather than adding overhead.
+PGM is faster on uniform data and about the same on skewed. At equal
+segment counts, the memory difference comes down to how segments are
+stored: PGM uses 16 bytes per segment and I use 24, because it stores
+the slope as a 32-bit float and I use a 64-bit double. Turning off PGM's
+recursive routing layer (a template parameter) slows its uniform lookups
+from 89.5 to 109.8 ns, so that layer clearly helps.
 
-An earlier version of this README claimed a 2x win over PGM on skewed
-data. That was an artifact of a broken dataset generator, described
-below.
+An earlier version of this README said my index was 2x faster than PGM
+on skewed data. That came from a broken dataset generator, which I cover
+in the bugs section.
 
 ### Inside the database
 
-The figures above time the read-only structure. The database uses a
-gapped array with live inserts, so it pays for gaps and for model
-drift. `cpp/benchmark_db_lookups.cpp` times that path against the same
-baselines, before and after inserting 100k keys.
+Everything above times the index on its own. The database uses the
+gapped array with inserts, so it has to deal with empty slots and a
+model that drifts. `cpp/benchmark_db_lookups.cpp` measures that path
+against the same baselines, before and after inserting 100k keys.
 
 | 1M keys, uniform | fresh | after 100k inserts |
 |---|---|---|
@@ -348,14 +346,14 @@ baselines, before and after inserting 100k keys.
 | read-only segmented model | 110.1 ns | 122.0 ns |
 | gapped array (the database) | 162.5 ns | 142.0 ns |
 
-So a real lookup runs about 1.9–2x faster than the B+-tree, not the
-2.7x the read-only structure manages. Missing keys cost about the same
-as hits, which is a consequence of the walk rather than an accident.
-One oddity I cannot yet explain: on uniform data the freshly built
-structure is slower than the same structure after 100,000 inserts
-(162.5 against 142.0 ns). Inserts trigger rebalances that refit the
-model, so the later layout may simply predict better, but I have not
-confirmed it.
+So a real lookup in the database is about 1.9–2x faster than the
+B+-tree, not the 2.7x the read-only index gets. Lookups for keys that
+don't exist cost about the same as ones that find something, since the
+walk does the same amount of work either way. One thing I haven't
+figured out yet: on uniform data, the freshly built array is slower than
+the same array after 100,000 inserts (162.5 vs 142.0 ns). The inserts
+trigger rebalances that refit the model, so the layout afterward might
+just be easier to predict, but I haven't confirmed that.
 
 ### Durability
 
@@ -364,243 +362,245 @@ confirmed it.
 | plain insert, no log | 3,251 |
 | durable put: log, fsync, insert | 118,125 |
 
-That is a 36x overhead, essentially all of it `fsync`, which is why
-real databases batch writes into one sync. The same demo on a
-different machine reported 1,926,085 ns against 2,702, a 713x
-overhead, because one fsync there costs about 1.9 ms instead of 113
-µs. Not a line of code differs between those runs. A durability
-multiplier describes the disk underneath at least as much as the
-database on top, which is worth remembering whenever one is quoted.
+That's about 36x slower per write, and nearly all of it is `fsync`,
+which is why real databases group several writes into one sync. When I
+ran the same test on a different machine, it came out to 1,926,085 ns vs
+2,702, or about 713x, because a single fsync there takes around 1.9 ms
+instead of 113 µs. The code was exactly the same. So a number like "36x"
+tells you about as much about the disk as it does about the database.
 
-### Under attack
+### Concentrated inserts
 
-Concentrating inserts into a narrow key range is the lever an attacker
-with write access actually has: it forces one region's segments to
-exhaust their gaps and rebalance far more often than scattered inserts
-would. Published poisoning attacks on ALEX and PGM-index report
-slowdowns of up to about 20%, which sets the scale.
+If someone controls what gets inserted, the obvious attack is to put all
+the inserts into a narrow range of keys. That uses up the gaps in one
+area and forces much more rebalancing than the same number of spread-out
+inserts. Published attacks on ALEX and PGM-index report slowdowns of up
+to about 20%, which gives a rough point of comparison.
 
-Each scenario inserts 100,000 keys into the same 900,000-key
-structure, nine times, interleaved, comparing against the benign
-scattered case from the same round.
+Each scenario inserts 100,000 keys into the same 900,000-key array. I
+ran each one nine times, alternating between scenarios, and compared
+each run to the normal spread-out case from the same round.
 
 | scenario | local rebalances | full rebalances | slowdown, two runs |
 |---|---|---|---|
-| benign, scattered | 0 | 195 | — |
+| spread out (normal) | 0 | 195 | — |
 | 5.0% window | 231 | 195 | +1.6%, −1.3% |
 | 2.0% window | 792 | 195 | +5.0%, +2.2% |
 | 1.2% window | 1,096 | 189 | +11.7%, +9.9% |
 
-The effect is real and grows as the window narrows, topping out around
-10%. The rebalance counts explain why it is not worse: local
-rebalances climb from 0 to 1,096 while full rebalances stay flat and
-even dip, so per-segment rebalancing absorbs nearly all the pressure
-and the expensive whole-array rebuilds the attack is aiming for never
-arrive. That resilience was a side effect. Per-segment rebalancing was
-added to make ordinary inserts faster.
+The slowdown is real and grows as the range gets narrower, reaching
+about 10%. The rebalance counts show why it isn't worse. Local
+rebalances go from 0 to 1,096, but full rebalances stay flat (and even
+drop slightly), so the per-segment rebalancing handles almost all of it
+and the expensive full rebuilds don't happen any more often. I didn't
+design it with this in mind; per-segment rebalancing was only added to
+make normal inserts faster.
 
-### Two experiments that went opposite ways
+### Learned Bloom filter and learned cache
 
-The same "learn the structure" idea was applied to two other places,
-with different outcomes worth reporting together.
+I also tried the same idea of learning the data's structure in two other
+places, and they went in opposite directions.
 
-A learned Bloom filter replaces the bit array with logistic regression
-over hashed features, trained with gradient descent, keeping a backup
-set so there are still no false negatives. It lost decisively.
+The first was a learned Bloom filter: a small machine learning model
+(logistic regression) that guesses whether a key is in the set, plus a
+backup list so it never wrongly says a key is missing. It lost badly.
 
 | filter | memory | false positive rate |
 |---|---|---|
-| classic, built for 1% | 119,814 bytes | 1.021% |
-| learned, same byte budget | 462,288 bytes | 50.380% |
+| normal Bloom filter, built for 1% | 119,814 bytes | 1.021% |
+| learned, matched byte budget | 462,288 bytes | 50.380% |
 | learned, 64x the memory | 7,668,048 bytes | 50.225% |
 
-Giving it 64 times the memory changed nothing, which rules out the
-obvious explanation. The real one is that membership in a set of
-arbitrary integers has no structure to learn. A classic Bloom filter
-hashes and flips bits, which is memorization, and memorization is
-about as space-efficient as information theory allows for this
-question. Sorted position, by contrast, is a smooth function worth
-approximating. The technique is not broken; it was asked a question
-its data has no answer to.
+Giving it 64 times more memory didn't help at all, which rules out the
+obvious explanation. The real reason is that whether some arbitrary
+integer is in a set just isn't something with a pattern to learn. A
+normal Bloom filter hashes and sets bits, which is basically
+memorization, and that's already about as efficient as you can get for
+this problem. A key's position in a sorted array is different, because
+it's a smooth function that a model can actually approximate.
 
-A learned cache went the other way. Logistic regression over recency
-and frequency, trained on one Zipfian trace and evaluated on another,
-approximates Belady's optimal eviction decisions using only
-information available at the time.
+The second was a learned cache, and that one worked. It uses the same
+kind of model to decide which item to remove from the cache, based on
+how recently and how often each item was used. I trained it on one
+access pattern and tested it on a different one, both with a few items
+used far more than the rest. The goal is to get close to Belady's
+policy, which makes the best possible choice but needs to know future
+requests, so it can't be used for real.
 
 | policy | hit rate |
 |---|---|
 | LRU | 58.67% |
 | learned, Hawkeye-style | 63.36% |
-| Belady's optimal (needs the future) | 74.63% |
+| Belady's optimal (needs to know the future) | 74.63% |
 
-That closes 29.4% of the gap between LRU and a ceiling no online
-policy can reach, which is in the range the Hawkeye and LRB papers
-report. Same tool, two problems, two honest answers.
+That closes 29.4% of the gap between LRU and Belady's policy. That's in
+line with what the Hawkeye and LRB papers report.
 
-## Bugs worth reading about
+## Bugs I found along the way
 
-Nearly every stage of this project surfaced a real bug, and in almost
-every case a correctness check caught it rather than a crash. A few
-are worth writing down.
+Almost every part of this project had at least one real bug, and nearly
+all of them were caught by a correctness check rather than a crash.
+These are the ones I think are most interesting.
 
-### The dataset that was not skewed
+### The skewed dataset wasn't skewed
 
 The best number this project ever produced was 26.9 ns per lookup on
-"skewed" data, roughly 12x faster than the B+-tree. It was an
-artifact.
+"skewed" data, about 12x faster than the B+-tree. It turned out to be
+wrong.
 
-The generator drew from a lognormal distribution and scaled the draws
-so the largest landed at n × 10. With sigma = 2 the largest draw is
-thousands of times bigger than a typical one, so nearly every draw
-floored into the same few hundred integers, and the loop that nudges
-collisions up by one turned them into a single run of consecutive
-integers: 999,819 of 1,000,000 keys, with 99.98% of gaps exactly 1. A
-straight line fits consecutive integers perfectly, which is why
-"skewed" data needed 2 or 3 segments where uniform data needed 84.
+The generator drew numbers from a lognormal distribution (one with a
+long tail of very large values) and scaled them so the largest one
+became n × 10. With sigma = 2, the largest draw is thousands of times
+bigger than a typical one, so almost all the draws rounded down to the
+same few hundred integers. Then the step that bumps duplicates up by one
+turned them into one long run of consecutive integers: 999,819 of the
+1,000,000 keys, with 99.98% of the gaps equal to 1. A straight line fits
+consecutive integers perfectly, which is why the "skewed" data needed
+only 2 or 3 segments when the uniform data needed 84.
 
-Scaling to 1e15 instead fixed it, and everything was re-measured:
+Scaling to 1e15 instead fixed it, and I re-ran every benchmark:
 
-| | flawed data | genuinely skewed |
+| | broken generator | fixed generator |
 |---|---|---|
 | segments (eps = 64) | 2–3 | 151 |
 | segmented lookup | 26.9 ns | 117.7 ns |
-| against the B+-tree | 12.5x | 2.7x |
-| against PGM-index | 2x faster | a tie |
+| vs. the B+-tree | 12.5x faster | 2.7x faster |
+| vs. PGM-index | 2x faster | about even |
 
-What survived: beating the B+-tree, the memory result, and the
-argument for segmentation over a single line. What did not: the
-headline. I had been checking results constantly and never checked the
-input. One look at the distribution of gaps would have caught it on
-day one.
+Beating the B+-tree, the memory results, and the case for segments over
+a single line all held up. The headline number didn't. I'd been checking
+results the whole time but never actually looked at the input data, and
+a quick look at the gaps between keys would have caught this right at
+the start.
 
-### A guarantee that covered less than I assumed
+### The error bound didn't cover new keys
 
-Segments guarantee that every key is predicted within ±eps, so every
-lookup scanned a ±eps window. That guarantee only covers keys the
-model was *trained* on. Any key inserted since the last refit, and any
-query for a key that isn't there, has no such bound, and nothing in
-the code said so.
+Each segment guarantees that every key is predicted within ±eps, so
+every lookup used to scan a ±eps window around the prediction. But that
+guarantee only applies to keys the model was trained on. A key inserted
+after the last refit, or a search for a key that doesn't exist, has no
+such bound, and nothing in the code accounted for that.
 
-It surfaced through a secondary index. One row's age had been updated
-to an outlier, which stretched a segment's key range far beyond its
-data, and a query for a value inside that stretch predicted slot 1644
-in a 1430-slot array. Four separate functions scanned that window, and
-each failed differently when it missed. The lower-bound function
-returned a later key instead of the first match. `insert` placed keys
-out of sorted order, which a randomized test later found in 284 of 300
-trials on committed code, and no existing test had ever caught. A
-first attempt at a fix added progressively larger fallback scans to
-`search`, which made every lookup for an absent key O(n) — 630,566 ns
-— and since every insert checks for duplicates first, insert
-throughput collapsed from 21,691 to 540,180 ns, slower than the naive
-vector the structure exists to beat. That attempt was measured and
-thrown away rather than committed.
+It showed up through a secondary index. One row's age had been updated
+to an outlier, which stretched a segment across a much wider range of
+keys than its data actually covered. A search for a value inside that
+range predicted slot 1644 in an array with 1430 slots. Four different
+functions scanned that window, and each one broke in a different way.
+The lower-bound function returned a later key instead of the first
+match. `insert` put keys out of sorted order, which a randomized test
+later found in 284 of 300 trials on the committed code. No existing test
+had caught it. My first attempt at a fix added bigger and bigger
+fallback scans to `search`, which made every search for a missing key
+O(n), at 630,566 ns. Every insert checks for duplicates first, so
+inserts went from 21,691 to 540,180 ns, slower than the plain sorted
+vector this structure is supposed to beat. I measured that, threw it
+out, and never committed it.
 
-The fix was to stop depending on the model for correctness. All four
-paths now share the walk described earlier, which is right regardless
-of prediction quality, plus a clamp that keeps a segment's line from
-predicting past the next segment's start. The model decides speed; the
-sorted array decides correctness. Worst case is still an O(n) walk if
-the model is badly wrong, but slow is a much better failure than
-wrong.
+The real fix was to stop relying on the model for correctness. All four
+functions now use the walk described above, which is correct no matter
+how bad the prediction is, and there's a clamp that keeps a segment from
+predicting past the start of the next one. The worst case is still an
+O(n) walk if the model is very wrong, but a slow lookup is a lot better
+than a wrong one.
 
-### A write-ahead log that lost writes after a crash
+### The write-ahead log could lose writes after a crash
 
-Replay skipped a record torn by a crash, which is correct, but left
-its bytes in the file. The log reopened in append mode, so the next
-write landed behind the garbage, and the restart after that read the
-torn bytes together with the next record. Writes made after a crash
-could be lost or misread — in the one component whose entire purpose
-is not losing writes.
+When replaying the log, a record that was only half written because of a
+crash got skipped, which is correct. But its bytes were left in the
+file, and because the log was reopened in append mode, the next write
+went right after them. On the following restart, replay read the
+leftover bytes together with the next record, so writes made after a
+crash could be lost or read incorrectly. That's a bad bug to have in the
+one component whose whole job is to not lose writes.
 
-There were no checksums either, so a tail of zero bytes (which some
-filesystems leave after a crash) parsed as valid records, and a
-damaged byte mid-log was accepted as data. The tests came first: chop
-the last bytes off a log, append zeros, flip a byte in the middle,
-hand it a file in the wrong format. Four of five checks failed on the
-old code. The format now has a header and a CRC-32 per record, and
-opening a log truncates it to the last intact record before anything
-new is appended.
+There were also no checksums, so a run of zero bytes at the end of the
+file (which some filesystems can leave behind after a crash) was read as
+valid records, and a corrupted byte in the middle was accepted as data.
+I wrote the tests first: cut the last few bytes off a log, add zeros to
+the end, flip a byte in the middle, and pass in a file that isn't a log
+at all. Four of the five checks failed on the old code. The log format
+now has a header and a CRC-32 on every record, and opening a log cuts it
+back to the last complete record before anything new gets written.
 
 ### What differential testing found
 
-Unit tests only cover the cases I thought of, so
-`python/sqlite_diff_test.py` generates random SQL, runs each statement
-against both this database and SQLite, and compares. When they
-disagree it shrinks the sequence to a minimal reproduction. It found
-two real bugs within its first few runs.
+Unit tests only check the cases I thought of, so
+`python/sqlite_diff_test.py` generates random SQL, runs every statement
+on both this database and SQLite, and compares the results. When they
+don't match, it shrinks the sequence of statements down to a minimal
+example. It found two real bugs in its first few runs.
 
-`LIMIT` was applied before `COUNT(*)` and `SUM` rather than to their
-result, so `SELECT COUNT(*) FROM items LIMIT 3` returned 3 on a
-four-row table. And an `INSERT` reusing an existing primary key
-overwrote the row but left its old secondary index entry in place, so
-a query on the old value still found the row through the index. The
-same flaw applied to an `UPDATE` that moved a row onto another row's
-key.
+The first was that `LIMIT` was applied before `COUNT(*)` and `SUM`
+instead of after, so `SELECT COUNT(*) FROM items LIMIT 3` returned 3 on
+a table with four rows. The second was that an `INSERT` with an existing
+primary key replaced the row but left its old secondary index entry
+behind, so searching for the old value still found the row through the
+index. An `UPDATE` that moved a row onto another row's key had the same
+problem.
 
-A later pass found that values outside the packing limits were not
-rejected but masked, which produced wrong answers rather than bad data
-alone: with an index on age, `WHERE age = 1048621` (that is 2^20 + 45)
-returned the age-45 rows, and `WHERE id BETWEEN -5 AND 3` returned
-nothing at all, because the negative bound wrapped into a huge key. Of
-the 13 checks written for this, 12 fail on the previous version.
+Later, while adding input validation, I found that values outside the
+key limits weren't being rejected. Instead, their extra bits were
+quietly cut off, which gave wrong results. With an index on age,
+`WHERE age = 1048621` (2^20 + 45) returned the rows with age 45, and
+`WHERE id BETWEEN -5 AND 3` returned nothing at all because the negative
+bound turned into a huge key. I wrote 13 checks for this, and 12 of them
+fail on the previous version.
 
-### The pattern
+### A pattern in these bugs
 
-Bug #3 was an unclamped bound in `insert`. Bug #5 was the identical
-mistake in `search`, unfixed for months because nobody grepped for
-siblings. Bug #6 was the same class again, spread across four
-functions at once. The lesson that finally stuck was not "grep for
-siblings" but "delete the siblings": all four lookups now share one
-code path, so there is nowhere for a partial fix to hide.
+One of the earliest bugs was a missing bounds check in `insert`. Much
+later, I found the exact same mistake in `search`, where it had been
+sitting for most of the project because I never checked for the same
+pattern anywhere else. The error-bound bug above was the same kind of
+problem again, in four functions at once. What finally fixed this for
+good was merging those functions: all four lookups now go through one
+piece of code, so there's only one place for that logic to be wrong.
 
-## How it is tested
+## Testing
 
-- 41 storage-engine tests, 20 parser tests, and 79 end-to-end SQL
-  tests, all passing.
-- Randomized trials against reference data structures: gapped-array
-  contents against a `std::map`, outlier-heavy insert and delete
-  sequences against a `std::set`, and the optimal segmenter against a
-  brute-force search over every candidate line.
-- Crash-recovery tests that damage a real log file: truncated,
-  zero-padded, bit-flipped, and wrong-format.
+- 41 storage engine tests, 20 parser tests, and 79 end-to-end SQL tests,
+  all passing.
+- Randomized tests against reference data structures: the gapped array's
+  contents against a `std::map`, insert and delete sequences with
+  outliers against a `std::set`, and the optimal segmenter against a
+  brute-force search over every possible line.
+- Crash recovery tests that damage a real log file by truncating it,
+  padding it with zeros, flipping a bit, or swapping in a file with the
+  wrong format.
 - Differential testing against SQLite, with automatic shrinking of
-  failures. The current pass is 200 runs of 300 statements plus 50
-  runs of 1,000, including deliberately invalid statements,
-  checkpoints and restarts, with no disagreements.
-- AddressSanitizer and UBSan on every suite. This caught two real
-  memory bugs that ordinary runs missed.
-- GitHub Actions runs all of the above on every push.
+  failures. The latest pass was 200 runs of 300 statements and 50 runs
+  of 1,000, including invalid statements, checkpoints and restarts, with
+  no mismatches.
+- AddressSanitizer and UBSan on every test suite. These caught two real
+  memory bugs that normal runs didn't.
+- GitHub Actions runs all of this on every push.
 
-Benchmarks are deliberately excluded from CI, since timings from
-shared machines mean nothing. Every number in this README was measured
-on a quiet machine, and the runs behind each are recorded in
-`results/`.
+The benchmarks aren't part of CI, because timings on shared machines are
+too noisy to mean much. Every number in this README was measured on a
+quiet machine, and the raw results are in `results/`.
 
 ## Limits
 
-Stated plainly, because most of them are deliberate:
+Most of these are on purpose:
 
-- No joins, no multi-statement transactions, no concurrent access.
-  Each is its own project.
-- The first column of a table is the primary key. There is no
+- No joins, multi-statement transactions, or concurrent access. Each of
+  those would be a big project on its own.
+- The first column of a table is always the primary key. There's no
   `PRIMARY KEY` syntax.
-- Keys are packed: 16 bits of table id and 48 bits of primary key, or
-  20 bits of value and 28 bits of primary key inside a secondary
-  index. Values outside those ranges are rejected.
-- A lookup is O(n) in the worst case, if the model is badly wrong.
-  Correctness never depends on the model, only speed does.
-- A checkpoint rewrites the whole store, so the write that triggers
-  one is slow. A production database would do that work in the
-  background.
-- `EXPLAIN` covers `SELECT` only.
+- Keys are packed into 64 bits: 16 bits for the table id and 48 for the
+  primary key, or 20 bits for the value and 28 for the primary key
+  inside a secondary index. Values outside those ranges are rejected.
+- A lookup can be O(n) in the worst case if the model is very wrong.
+  That only affects speed, not correctness.
+- A checkpoint rewrites the whole store, so the write that triggers one
+  is slow. A production database would do that in the background.
+- `EXPLAIN` only works with `SELECT`.
 
 ## References
 
 - Kraska, Beutel, Chi, Dean, Polyzotis. "The Case for Learned Index
   Structures" (2018).
-- Ferragina, Vinciguerra. "The PGM-index" (2020). Vendored under
+- Ferragina, Vinciguerra. "The PGM-index" (2020). Included under
   `cpp/third_party/pgm/`, Apache 2.0.
 - Ding et al. "ALEX: An Updatable Adaptive Learned Index" (2020).
 - O'Rourke. "An on-line algorithm for fitting straight lines between
