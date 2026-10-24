@@ -1,15 +1,20 @@
 // Point-lookup speed of the structure the database actually uses.
 //
-// The lookup numbers earlier in the README (Phases 0-2 and 7a) time the
-// Phase 2 segmented model over a dense, read-only sorted array. The
-// database doesn't use that. DurableStore sits on the Phase 3 gapped
-// array, which has gaps to skip, walks from each prediction with
-// locate(), and has a model that drifts between refits as inserts land.
-// This times that structure directly, both freshly built and after 10%
-// more keys have been inserted, next to the same baselines.
+// The main lookup benchmarks time the Phase 2 segmented model over a
+// dense, read-only sorted array. The database doesn't use that.
+// DurableStore sits on the Phase 3 gapped array, which has gaps to skip,
+// walks from each prediction with locate(), and has a model that drifts
+// between refits as inserts land. This times that structure directly,
+// both freshly built and after 10% more keys have been inserted, next to
+// the same baselines.
 //
-// Every structure's answers are checked before anything is timed, and
-// each timing is the median of several passes over the same queries.
+// Every structure's answers are checked before anything is timed. Each
+// pass then times every structure once, in turn, and the reported number
+// is the median over passes. An earlier version timed the structures one
+// after another instead, and that made results depend on when each one
+// ran: the same array measured 126 ns early in a run and 142 ns later in
+// the same run, a bigger swing than some of the differences being
+// measured.
 //
 // usage: benchmark_db_lookups <keys.bin> [passes]
 #include <algorithm>
@@ -47,21 +52,21 @@ std::vector<int64_t> sample(const std::vector<int64_t>& from, size_t count, uint
 
 volatile int64_t g_sink = 0;  // written after every timed loop so the loop can't be optimized away
 
-// Median nanoseconds per query over `passes` runs of `lookup` across
-// every query.
+// Nanoseconds per query for one pass of `lookup` over every query.
 template <typename Lookup>
-double median_ns(const std::vector<int64_t>& queries, int passes, Lookup lookup) {
-  std::vector<double> samples;
+double time_pass(const std::vector<int64_t>& queries, Lookup lookup) {
   int64_t sink = 0;
-  for (int p = 0; p < passes; p++) {
-    const auto t0 = std::chrono::steady_clock::now();
-    for (int64_t q : queries) sink += lookup(q);
-    const auto t1 = std::chrono::steady_clock::now();
-    samples.push_back(std::chrono::duration<double, std::nano>(t1 - t0).count() / queries.size());
-  }
+  const auto t0 = std::chrono::steady_clock::now();
+  for (int64_t q : queries) sink += lookup(q);
+  const auto t1 = std::chrono::steady_clock::now();
   g_sink = sink;
-  std::sort(samples.begin(), samples.end());
-  return samples[samples.size() / 2];
+  return std::chrono::duration<double, std::nano>(t1 - t0).count() / queries.size();
+}
+
+double median(std::vector<double> v) {
+  std::sort(v.begin(), v.end());
+  const size_t n = v.size();
+  return (n % 2 == 1) ? v[n / 2] : (v[n / 2 - 1] + v[n / 2]) / 2.0;
 }
 
 // Checks that `lookup` finds every query (or, for misses, none of
@@ -122,40 +127,42 @@ int main(int argc, char** argv) {
 
   const std::vector<int64_t> hits = sample(initial, query_count, 42);
   const std::vector<int64_t> misses = sample(holdout, query_count, 43);
+  const auto bs_fresh = binary_search_in(initial);
+  const auto dense_fresh = dense_lookup_in(initial, dense_model);
 
-  const bool fresh_ok = answers_ok(hits, true, binary_search_in(initial)) &&
-                        answers_ok(misses, false, binary_search_in(initial)) &&
+  const bool fresh_ok = answers_ok(hits, true, bs_fresh) && answers_ok(misses, false, bs_fresh) &&
                         answers_ok(hits, true, btree_lookup) && answers_ok(misses, false, btree_lookup) &&
-                        answers_ok(hits, true, dense_lookup_in(initial, dense_model)) &&
-                        answers_ok(misses, false, dense_lookup_in(initial, dense_model)) &&
+                        answers_ok(hits, true, dense_fresh) && answers_ok(misses, false, dense_fresh) &&
                         answers_ok(hits, true, gapped_lookup) && answers_ok(misses, false, gapped_lookup);
   if (!fresh_ok) {
     std::fprintf(stderr, "correctness check FAILED on the freshly built structures\n");
     return 1;
   }
 
-  std::printf("== %s: %zu keys built, %zu held out ==\n", path.c_str(), initial.size(), holdout.size());
-  std::printf("%zu random hits and %zu misses, median of %d passes, ns/lookup\n\n", query_count, query_count,
-              passes);
-  std::printf("%-34s %10s %10s\n", "freshly built", "hits", "misses");
+  // t[structure][0] = hits, t[structure][1] = misses, one entry per pass
+  std::vector<double> t[4][2];
+  for (int p = 0; p < passes; p++) {
+    t[0][0].push_back(time_pass(hits, bs_fresh));
+    t[1][0].push_back(time_pass(hits, btree_lookup));
+    t[2][0].push_back(time_pass(hits, dense_fresh));
+    t[3][0].push_back(time_pass(hits, gapped_lookup));
+    t[0][1].push_back(time_pass(misses, bs_fresh));
+    t[1][1].push_back(time_pass(misses, btree_lookup));
+    t[2][1].push_back(time_pass(misses, dense_fresh));
+    t[3][1].push_back(time_pass(misses, gapped_lookup));
+  }
 
+  const char* names[4] = {"binary search", "B+-tree", "Phase 2 model, dense array", "gapped array (what the db uses)"};
   std::ofstream csv("results/db_lookups.csv", std::ios::app);
-  auto report = [&](const char* stage, const char* name, double hit_ns, double miss_ns) {
-    if (miss_ns < 0) {
-      std::printf("%-34s %10.1f %10s\n", name, hit_ns, "");
-    } else {
-      std::printf("%-34s %10.1f %10.1f\n", name, hit_ns, miss_ns);
-    }
-    csv << path << "," << stage << "," << name << "," << hit_ns << "," << miss_ns << "\n";
-  };
-
-  report("fresh", "binary search", median_ns(hits, passes, binary_search_in(initial)),
-         median_ns(misses, passes, binary_search_in(initial)));
-  report("fresh", "B+-tree", median_ns(hits, passes, btree_lookup), median_ns(misses, passes, btree_lookup));
-  report("fresh", "Phase 2 model, dense array", median_ns(hits, passes, dense_lookup_in(initial, dense_model)),
-         median_ns(misses, passes, dense_lookup_in(initial, dense_model)));
-  report("fresh", "gapped array (what the db uses)", median_ns(hits, passes, gapped_lookup),
-         median_ns(misses, passes, gapped_lookup));
+  std::printf("== %s: %zu keys built, %zu held out ==\n", path.c_str(), initial.size(), holdout.size());
+  std::printf("%zu random hits and %zu misses, median of %d interleaved passes, ns/lookup\n\n", query_count,
+              query_count, passes);
+  std::printf("%-34s %10s %10s\n", "freshly built", "hits", "misses");
+  for (int s = 0; s < 4; s++) {
+    const double hit_ns = median(t[s][0]), miss_ns = median(t[s][1]);
+    std::printf("%-34s %10.1f %10.1f\n", names[s], hit_ns, miss_ns);
+    csv << path << ",fresh," << names[s] << "," << hit_ns << "," << miss_ns << "\n";
+  }
 
   // Insert the held-out keys. The gapped array absorbs them with local
   // rebalances; the dense structures have to be rebuilt from scratch,
@@ -166,23 +173,31 @@ int main(int argc, char** argv) {
   }
   const SegmentedModel rebuilt_model = build_segmented_model(all_keys, eps);
   const std::vector<int64_t> hits_after = sample(all_keys, query_count, 44);
+  const auto bs_after = binary_search_in(all_keys);
+  const auto dense_after = dense_lookup_in(all_keys, rebuilt_model);
 
-  const bool after_ok = answers_ok(hits_after, true, binary_search_in(all_keys)) &&
-                        answers_ok(hits_after, true, btree_lookup) &&
-                        answers_ok(hits_after, true, dense_lookup_in(all_keys, rebuilt_model)) &&
-                        answers_ok(hits_after, true, gapped_lookup);
+  const bool after_ok = answers_ok(hits_after, true, bs_after) && answers_ok(hits_after, true, btree_lookup) &&
+                        answers_ok(hits_after, true, dense_after) && answers_ok(hits_after, true, gapped_lookup);
   if (!after_ok) {
     std::fprintf(stderr, "correctness check FAILED after inserts\n");
     return 1;
   }
 
+  std::vector<double> u[4];
+  for (int p = 0; p < passes; p++) {
+    u[0].push_back(time_pass(hits_after, bs_after));
+    u[1].push_back(time_pass(hits_after, btree_lookup));
+    u[2].push_back(time_pass(hits_after, dense_after));
+    u[3].push_back(time_pass(hits_after, gapped_lookup));
+  }
+  const char* after_names[4] = {"binary search (rebuilt array)", "B+-tree", "Phase 2 model (rebuilt)",
+                                "gapped array (what the db uses)"};
   std::printf("\nafter inserting the %zu held-out keys (%zu local + %zu full rebalances)\n", holdout.size(),
               ga.local_rebalance_count(), ga.rebalance_count());
-  report("after_inserts", "binary search (rebuilt array)", median_ns(hits_after, passes, binary_search_in(all_keys)),
-         -1);
-  report("after_inserts", "B+-tree", median_ns(hits_after, passes, btree_lookup), -1);
-  report("after_inserts", "Phase 2 model (rebuilt)", median_ns(hits_after, passes, dense_lookup_in(all_keys, rebuilt_model)),
-         -1);
-  report("after_inserts", "gapped array (what the db uses)", median_ns(hits_after, passes, gapped_lookup), -1);
+  for (int s = 0; s < 4; s++) {
+    const double hit_ns = median(u[s]);
+    std::printf("%-34s %10.1f\n", after_names[s], hit_ns);
+    csv << path << ",after_inserts," << after_names[s] << "," << hit_ns << ",-1\n";
+  }
   return 0;
 }

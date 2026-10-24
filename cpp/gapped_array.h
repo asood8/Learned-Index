@@ -13,10 +13,10 @@
 // segment tracks its own insert count since it was last refreshed;
 // once that hits the threshold, only *that segment's* physical
 // region gets redistributed and refit -- not the entire structure.
-// A much less frequent whole-array rebalance is kept as a periodic
+// A much less frequent whole-array rebalance was kept as a periodic
 // safety net, since a single insert's shift can occasionally still
 // reach across a segment boundary (bounded by max_gap_scan_, but not
-// perfectly confined to one segment's territory).
+// perfectly confined to one segment's territory). v4 removed it.
 //
 // v3: it can store a value with each key. DurableStore used to keep
 // rows in a separate std::unordered_map and use this array only to
@@ -32,15 +32,30 @@
 // build_segmented_model(), not build_optimal_segmented_model(). The
 // optimal fit needs about a quarter fewer segments on this layout (180
 // vs 235 on 1M wide-range lognormal keys), but it took 4-7x longer to
-// fit, and this
-// array refits its whole model on every full rebalance (195 of them per
-// 100k inserts in the Phase 3 benchmark). Switching made inserts about
-// 2.5x slower, in exchange for saving ~1 KB of segments.
+// fit, and this array refits its whole model on every full rebalance
+// (195 of them per 100k inserts in the Phase 3 benchmark). Switching
+// made inserts about 2.7x slower, in exchange for saving ~1 KB of
+// segments.
+//
+// v4: inserts no longer cost O(n). The safety net rebuilt the whole
+// array every 8*eps = 512 inserts whatever its size, and one rebuild
+// took 10.8 ms at 1M keys, which by itself came to nearly all of the
+// ~21 us an insert cost (and ~262 us per insert at 10M keys). It was
+// needed because a shift that crossed into a neighboring segment wasn't
+// counted against that neighbor. Now it is (see insert()), so each
+// segment's count bounds how far its keys have drifted, and the safety
+// net is gone. Three other things also forced full rebuilds and are
+// fixed too, all in local_rebalance(): a crowded region, which now
+// borrows room from its neighbors the way a packed-memory array does;
+// keys appended past the end, which now grow the array; and segments
+// long enough that refreshing one cost as much as rebuilding
+// everything, now capped at kMaxSegmentKeys.
 #pragma once
 
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <tuple>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -150,6 +165,17 @@ class BasicGappedArray {
     return locate(predict(target), target, nullptr);
   }
 
+  // Same as lower_bound_index(), but starting from any slot instead of
+  // the model's prediction. A lookup is supposed to be correct wherever
+  // it starts, and this lets tests check that directly, along with what
+  // a bad starting guess costs (`probes` = slots examined).
+  size_t lower_bound_from(int64_t start, int64_t target, int* probes = nullptr) const {
+    int examined = 0;
+    const size_t idx = locate(start, target, &examined);
+    if (probes != nullptr) *probes = examined;
+    return idx;
+  }
+
   // All real keys in [lo, hi], inclusive, in sorted order. Correctness
   // comes from checking the actual stored key values against the
   // bounds -- the model only helps find where to *start* scanning.
@@ -167,10 +193,11 @@ class BasicGappedArray {
     return results;
   }
 
-  // Inserts key in sorted order. Tries a nearby gap first; falls back
-  // to a full rebuild only when the local area has run out of room --
-  // the same "batch retrain" idea mentioned as the easy option, used
-  // here only as a last resort instead of the default behavior. If the
+  // Inserts key in sorted order. Tries a nearby gap first; when there's
+  // none within reach, refreshes the surrounding region, and rebuilds
+  // the whole array only when all of it is too full -- the same "batch
+  // retrain" idea mentioned as the easy option, used here only as a last
+  // resort instead of the default behavior. If the
   // key is already present, a key-only array does nothing and one that
   // stores values replaces the value, so insert() doubles as update.
   void insert(int64_t key, V value = V()) {
@@ -190,15 +217,25 @@ class BasicGappedArray {
     // from locate() instead makes placement correct however far off
     // the prediction was, and doubles as the duplicate check,
     // replacing what used to be a separate search() call.
-    const size_t owning_segment = find_segment_index(model_.segments, key);
-    const int64_t insertion_point =
-        static_cast<int64_t>(locate(predict_from(owning_segment, key), key, nullptr));
+    size_t owning_segment = find_segment_index(model_.segments, key);
+    int64_t insertion_point = static_cast<int64_t>(locate(predict_from(owning_segment, key), key, nullptr));
     if (insertion_point < static_cast<int64_t>(data_.size()) && data_[insertion_point] == key) {
       if constexpr (kStoresValues) vals_[insertion_point] = std::move(value);
       return;  // key already present: never a second copy
     }
 
-    const int64_t gap = find_nearest_gap(insertion_point);
+    int64_t gap = find_nearest_gap(insertion_point);
+    if (gap < 0) {
+      // No gap within reach. Refreshing the segment spreads its gaps out
+      // again, borrowing room from its neighbors or growing the array if
+      // it has to (see local_rebalance()), which is far cheaper than the
+      // full rebuild this used to go straight to. Then the spot has to be
+      // found again, since that moved keys and may have split the segment.
+      local_rebalance(owning_segment);
+      owning_segment = find_segment_index(model_.segments, key);
+      insertion_point = static_cast<int64_t>(locate(predict_from(owning_segment, key), key, nullptr));
+      gap = find_nearest_gap(insertion_point);
+    }
     if (gap < 0) {
       rebalance_with(key, std::move(value));
       return;
@@ -213,43 +250,53 @@ class BasicGappedArray {
     }
     count_++;
 
-    // Bump just the owning segment's counter. Once it crosses the
-    // threshold, only that segment's physical region gets refreshed
-    // -- cheap, since segments are typically a small slice of the
-    // whole array. A much larger global counter still runs
-    // underneath as a safety net (see below), since max_gap_scan_
-    // means a shift can occasionally still land just across a
-    // segment boundary, slightly outside what the owning segment's
-    // own counter tracked.
-    segment_insert_counts_[owning_segment]++;
-    if (segment_insert_counts_[owning_segment] >= segment_threshold_) {
-      local_rebalance(owning_segment);
+    // Count this insert against every segment it changed: the one that
+    // gained the key, and any neighbor whose keys the shift pushed one
+    // slot over. The gap search doesn't stop at segment boundaries (it
+    // looks up to max_gap_scan_ slots each way), so a shift can cross
+    // one. Those crossings used to go uncounted, and a full rebuild every
+    // 512 inserts covered for them (see v4 at the top). Each segment
+    // whose count reaches the threshold gets its region refreshed.
+    const std::vector<Segment>& segs = model_.segments;
+    size_t first = owning_segment, last = owning_segment;
+    if (gap > insertion_point && last + 1 < segs.size() && data_[gap] >= segs[last + 1].start_key) {
+      last = find_segment_index(segs, data_[gap]);  // the largest key that moved right is now at slot gap
     }
-
-    inserts_since_rebalance_++;
-    if (inserts_since_rebalance_ >= global_threshold_) {
-      rebalance();
+    if (gap < insertion_point - 1 && data_[gap] < segs[first].start_key) {
+      first = find_segment_index(segs, data_[gap]);  // the smallest key that moved left is now at slot gap
     }
+    for (size_t si = first; si <= last; si++) segment_changes_[si]++;
+    refresh_segments(first, last);
   }
 
   size_t size() const { return count_; }
   size_t capacity() const { return data_.size(); }
+  size_t segment_count() const { return model_.segments.size(); }
   size_t rebalance_count() const { return rebalance_count_; }
   size_t local_rebalance_count() const { return local_rebalance_count_; }
+
+  // No segment covers more keys than this; see build_segmented_model().
+  static constexpr size_t kMaxSegmentKeys = 4096;
+  // How full a segment's region may get before refreshing it needs room
+  // from its neighbors, and how full the whole array may get before it's
+  // rebuilt bigger; windows in between get limits in between. See
+  // density_limit().
+  static constexpr double kSegmentDensityLimit = 0.9;
+  static constexpr double kArrayDensityLimit = 0.8;
 
  private:
   std::vector<int64_t> data_;
   std::vector<V> vals_;  // parallel to data_; stays empty when V is NoValue
   SegmentedModel model_;
-  std::vector<size_t> segment_insert_counts_;  // parallel to model_.segments
+  // Parallel to model_.segments: how many inserts since the segment was
+  // last fit either added a key to it or moved one of its keys.
+  std::vector<size_t> segment_changes_;
   double density_ = 0.7;
   int64_t eps_ = 0;
   size_t count_ = 0;
   size_t rebalance_count_ = 0;
   size_t local_rebalance_count_ = 0;
-  size_t inserts_since_rebalance_ = 0;
-  size_t segment_threshold_ = 1;   // per-segment inserts before a local rebalance
-  size_t global_threshold_ = 1;    // total inserts before a full-array safety-net rebalance
+  size_t segment_threshold_ = 1;   // changes to a segment before its region is refreshed
   int64_t max_gap_scan_ = 1;       // bounds how far a single insert's shift can reach
 
   // Every slot move goes through these two, so a value can't be left
@@ -312,8 +359,7 @@ class BasicGappedArray {
 
   // The one place a prediction becomes an answer: the physical index
   // of the first real key >= target, or data_.size() if there isn't
-  // one. Walks from the predicted slot toward the answer, in whichever
-  // direction the stored keys say it lies:
+  // one. It starts at the predicted slot and moves toward the answer:
   //   1. step left while the slot to the left is a gap or holds a key
   //      >= target -- the answer can't be to the right of either;
   //   2. step right past gaps and keys < target.
@@ -323,6 +369,19 @@ class BasicGappedArray {
   // holds whatever the model predicted: the model only decides where
   // the walk starts, i.e. how long it is.
   //
+  // Stepping one slot at a time is cheap when the guess is close, since
+  // neighboring slots share cache lines, but on its own it made a
+  // far-off guess cost O(distance), and O(n) at worst. So each direction
+  // only steps eps slots, the model's own error bound: a key the model
+  // was trained on is about that close, so going further means the model
+  // is outside its promise. Past that, gallop() takes over and finishes
+  // in O(log distance). Galloping sooner was measured and made ordinary
+  // lookups slower (157 vs 134 ns at a limit of 1), because binary
+  // search jumps around memory while the walk reads neighboring slots;
+  // at a limit of 64 ordinary lookups cost about the same as the plain
+  // walk, and a lookup started at the wrong end of a 1.3M-slot array
+  // fell from about 0.6 ms to under 0.2 microseconds.
+  //
   // This replaced a fixed +/-eps window. The eps guarantee only covers
   // keys the model was trained on; for any other key (one inserted
   // since the last refit, or a query for an absent one) nothing bounds
@@ -331,24 +390,100 @@ class BasicGappedArray {
   // lower_bound_index() returned a later key than the true first one,
   // insert() placed keys out of sorted order, and search() had grown a
   // full-array fallback that made every absent-key lookup -- including
-  // insert()'s own duplicate check -- O(n). The cost is now O(distance
-  // from prediction to answer) rather than a fixed window.
+  // insert()'s own duplicate check -- O(n).
   size_t locate(int64_t predicted, int64_t target, int* probes) const {
     const int64_t n = static_cast<int64_t>(data_.size());
     int64_t i = std::clamp<int64_t>(predicted, 0, n);
+    const int64_t walk_limit = std::max<int64_t>(eps_, 1);
     int examined = 0;
-    while (i > 0) {
+    bool far = false;
+    // The stopping slot is worked out once, so each step does the same
+    // work as an unlimited walk. Checking a step counter on every step
+    // instead made ordinary lookups a few percent slower (2-11% across
+    // runs), which isn't worth paying for a case that's rare.
+    const int64_t left_stop = std::max<int64_t>(i - walk_limit, 0);
+    while (i > left_stop) {
       examined++;
       if (data_[i - 1] < target) break;  // gaps are EMPTY_SLOT = INT64_MAX, never < target
       i--;
     }
-    while (i < n) {
-      examined++;
-      if (data_[i] != EMPTY_SLOT && data_[i] >= target) break;
-      i++;
+    if (i == left_stop && i > 0 && data_[i - 1] >= target) far = true;  // out of steps, answer still to the left
+    if (!far) {
+      const int64_t right_stop = std::min<int64_t>(i + walk_limit, n);
+      while (i < right_stop) {
+        examined++;
+        if (data_[i] != EMPTY_SLOT && data_[i] >= target) break;
+        i++;
+      }
+      if (i == right_stop && i < n && (data_[i] == EMPTY_SLOT || data_[i] < target)) far = true;  // still to the right
     }
+    if (far) i = gallop(i, target, examined);
     if (probes != nullptr) *probes = examined;
     return static_cast<size_t>(i);
+  }
+
+  // Is the first real key at or after slot j at least `target`? At
+  // j == data_.size() the answer is yes by definition. Since the array
+  // is sorted, this flips from no to yes exactly once as j grows, and
+  // the lower bound is the first real key at or after that flip. That's
+  // what lets gallop() binary search even though gaps are scattered
+  // through the array.
+  bool reaches(int64_t j, int64_t target, int& examined) const {
+    const int64_t n = static_cast<int64_t>(data_.size());
+    while (j < n && data_[j] == EMPTY_SLOT) {
+      j++;
+      examined++;
+    }
+    if (j == n) return true;
+    examined++;
+    return data_[j] >= target;
+  }
+
+  // The far-off case. Jumps 1, 2, 4, 8, ... slots from i, in whichever
+  // direction the answer is, until the flip in reaches() is bracketed,
+  // then binary searches inside the bracket. That's O(log distance)
+  // calls to reaches(), each of which also skips any empty slots it
+  // lands on; those runs are short after a rebalance, but deletes can
+  // leave longer ones until the next.
+  int64_t gallop(int64_t i, int64_t target, int& examined) const {
+    const int64_t n = static_cast<int64_t>(data_.size());
+    int64_t lo, hi;  // reaches(lo) is false (lo == -1 counts as false); reaches(hi) is true
+    if (reaches(i, target, examined)) {
+      hi = i;
+      for (int64_t step = 1;; step *= 2) {
+        lo = hi - step;
+        if (lo < 0) {
+          lo = -1;
+          break;
+        }
+        if (!reaches(lo, target, examined)) break;
+        hi = lo;
+      }
+    } else {
+      lo = i;
+      for (int64_t step = 1;; step *= 2) {
+        hi = lo + step;
+        if (hi >= n) {
+          hi = n;
+          break;
+        }
+        if (reaches(hi, target, examined)) break;
+        lo = hi;
+      }
+    }
+    while (hi - lo > 1) {
+      const int64_t mid = lo + (hi - lo) / 2;
+      if (reaches(mid, target, examined)) {
+        hi = mid;
+      } else {
+        lo = mid;
+      }
+    }
+    while (hi < n && data_[hi] == EMPTY_SLOT) {
+      hi++;
+      examined++;
+    }
+    return hi;
   }
 
   int64_t find_nearest_gap(int64_t start) const {
@@ -390,19 +525,17 @@ class BasicGappedArray {
       last_slot = target;
     }
 
-    model_ = build_segmented_model(sorted_keys, positions, eps_);
+    model_ = build_segmented_model(sorted_keys, positions, eps_, segment_cap(n));
     count_ = n;
-    inserts_since_rebalance_ = 0;
-    segment_insert_counts_.assign(model_.segments.size(), 0);
+    segment_changes_.assign(model_.segments.size(), 0);
 
-    // Worst case, every insert since a segment was last refreshed
-    // could have landed right on top of the same key, drifting it by
-    // one position each time -- so both thresholds are tied to eps
-    // itself (the budget being protected), not to array size. The
-    // global one is set looser since local rebalancing now handles
-    // the common case; it's a safety net, not the primary mechanism.
+    // A change counted against a segment moves each of its keys by at
+    // most one slot, so refreshing a segment once its count reaches eps
+    // keeps every key it was fit on within 2*eps of its prediction: eps
+    // from the fit itself, and less than eps of drift since. The
+    // threshold is tied to eps (the budget being protected), not to
+    // array size.
     segment_threshold_ = std::max<size_t>(1, static_cast<size_t>(eps_));
-    global_threshold_ = std::max<size_t>(1, static_cast<size_t>(eps_) * 8);
     max_gap_scan_ = std::max<int64_t>(1, eps_ * 8);
   }
 
@@ -440,52 +573,119 @@ class BasicGappedArray {
     rebalance_count_++;
   }
 
-  // Refreshes just one segment's physical region: finds its current
-  // slot boundaries (via search, since the segment's own anchor key
-  // and the next segment's anchor key are always real, findable keys),
-  // redistributes its keys within that same slot range, and refits a
-  // fresh local model. If that region is too full to leave reasonable
-  // breathing room, falls back to the always-correct full rebalance
-  // instead of forcing a bad local fit.
-  void local_rebalance(size_t si) {
-    const int64_t lo_key = model_.segments[si].start_key;
-    const bool is_last = (si + 1 == model_.segments.size());
-
-    size_t phys_lo;
-    if (!search(lo_key, phys_lo)) {
-      rebalance();
-      return;
+  // Refreshes every segment in [first, last] whose count has reached the
+  // threshold. Highest index first: a refresh can split a segment into
+  // several, which shifts the indices after it but never the ones before.
+  void refresh_segments(size_t first, size_t last) {
+    for (size_t si = last + 1; si-- > first;) {
+      if (segment_changes_[si] < segment_threshold_) continue;
+      const size_t full_rebuilds = rebalance_count_;
+      local_rebalance(si);
+      if (rebalance_count_ != full_rebuilds) return;  // fell back to a full rebuild, which refreshed everything
     }
+  }
 
-    size_t phys_hi_exclusive;
-    if (is_last) {
-      phys_hi_exclusive = data_.size();
+  // Refreshes segment si by re-laying a window of segments around it:
+  // just si if its region has room, otherwise a wider window, the way a
+  // packed-memory array rebalances (Itai, Konheim and Rodeh 1981; Bender,
+  // Demaine and Farach-Colton 2000). The window doubles, to the aligned
+  // pair of segments containing si, then four, then eight, until it's
+  // under its density limit, so a crowded region borrows gaps from its
+  // neighbors. Only a whole array over its limit gets a full rebuild,
+  // which also makes the array bigger. A crowded region used to go
+  // straight to a full rebuild, so a hot spot (inserts concentrated in
+  // one key range) set one off every few dozen inserts.
+  //
+  // The last segment is the exception: its region ends where the array
+  // does, so it can get more slots on the end instead, and no other key
+  // has to move. That's what keeps appends cheap. Every key larger than
+  // all the others lands there (an auto-increment id, say), and filling
+  // that region used to set off a full rebuild every few hundred inserts,
+  // 18-41 us per append at 1M keys. std::vector grows its storage
+  // geometrically, so growing a little at a time is still amortized O(1)
+  // per key.
+  void local_rebalance(size_t si) {
+    const size_t segment_total = model_.segments.size();
+    size_t lo = si, hi = si;
+    auto [begin, end] = region(lo, hi);
+    size_t keys = count_keys(begin, end);
+    if (hi + 1 == segment_total && too_dense(keys, end - begin, 0)) {
+      const size_t wanted = std::max(keys + 1, static_cast<size_t>(std::ceil(keys / density_)));
+      if (begin + wanted > data_.size()) {
+        const size_t new_size = begin + wanted;
+        // Grow the storage by a quarter at a time. Still geometric, so
+        // still amortized O(1), but std::vector's own doubling could leave
+        // half of it unused: 100.6 vs 92.4 bytes per row after loading 1M
+        // rows by INSERT, at the same append speed.
+        if (new_size > data_.capacity()) {
+          const size_t grown = std::max(new_size, data_.size() + data_.size() / 4);
+          data_.reserve(grown);
+          if constexpr (kStoresValues) vals_.reserve(grown);
+        }
+        data_.resize(new_size, EMPTY_SLOT);
+        if constexpr (kStoresValues) vals_.resize(data_.size());
+      }
+      end = data_.size();
     } else {
-      const int64_t hi_key = model_.segments[si + 1].start_key;
-      if (!search(hi_key, phys_hi_exclusive)) {
-        rebalance();
-        return;
+      for (size_t level = 1; too_dense(keys, end - begin, level - 1); level++) {
+        if (lo == 0 && hi + 1 == segment_total) {
+          rebalance();  // the whole array is too full: rebuild it bigger
+          return;
+        }
+        const size_t width = size_t{1} << level;
+        lo = si / width * width;
+        hi = std::min(lo + width, segment_total) - 1;
+        std::tie(begin, end) = region(lo, hi);
+        keys = count_keys(begin, end);
       }
     }
+    relay(lo, hi, begin, end, keys);
+    local_rebalance_count_++;
+  }
 
-    size_t local_count = 0;
-    for (size_t idx = phys_lo; idx < phys_hi_exclusive; idx++) {
-      if (data_[idx] != EMPTY_SLOT) local_count++;
-    }
+  // The slots holding segments lo..hi: from the first key at or above
+  // segment lo's start up to the first key of segment hi + 1. The first
+  // segment's region starts at slot 0 instead, since it also owns any key
+  // smaller than its start, and the last one's runs to the end of the
+  // array. Going by key value rather than looking up each anchor key
+  // keeps a region well defined after its anchor has been removed; that
+  // lookup used to fail and fall back to a full rebuild.
+  std::pair<size_t, size_t> region(size_t lo, size_t hi) const {
+    const size_t begin = (lo == 0) ? 0 : lower_bound_index(model_.segments[lo].start_key);
+    const size_t end = (hi + 1 == model_.segments.size()) ? data_.size()
+                                                          : lower_bound_index(model_.segments[hi + 1].start_key);
+    return {begin, end};
+  }
 
-    const size_t region_capacity = phys_hi_exclusive - phys_lo;
-    // if this region has grown too dense, a local fix won't leave
-    // enough room to be worth it -- fall back to the full rebalance
-    if (region_capacity == 0 || local_count >= static_cast<size_t>(0.9 * region_capacity)) {
-      rebalance();
-      return;
-    }
+  size_t count_keys(size_t begin, size_t end) const {
+    size_t n = 0;
+    for (size_t idx = begin; idx < end; idx++) n += (data_[idx] != EMPTY_SLOT);
+    return n;
+  }
 
+  // Is a window at this level (0 is one segment; each level up doubles
+  // the window) too full to re-lay with room to spare? The limit falls
+  // from kSegmentDensityLimit for one segment to kArrayDensityLimit for
+  // the whole array. Wider windows get lower limits so that re-laying one
+  // leaves every smaller window inside it well under its own limit, which
+  // is what keeps the wider, costlier refreshes rare.
+  bool too_dense(size_t keys, size_t slots, size_t level) const {
+    if (keys == 0) return false;
+    size_t height = 0;  // the level at which one window covers every segment
+    while ((size_t{1} << height) < model_.segments.size()) height++;
+    const double t = (height == 0) ? 0.0 : std::min(1.0, static_cast<double>(level) / static_cast<double>(height));
+    const double limit = kSegmentDensityLimit - (kSegmentDensityLimit - kArrayDensityLimit) * t;
+    return static_cast<double>(keys) >= limit * static_cast<double>(slots);
+  }
+
+  // Re-lays the keys in slots [begin, end) evenly across those slots and
+  // replaces segments lo..hi with a fresh fit of them.
+  void relay(size_t lo, size_t hi, size_t begin, size_t end, size_t keys) {
     std::vector<int64_t> local_keys;
     std::vector<V> local_values;
-    local_keys.reserve(local_count);
-    if constexpr (kStoresValues) local_values.reserve(local_count);
-    for (size_t idx = phys_lo; idx < phys_hi_exclusive; idx++) {
+    local_keys.reserve(keys);
+    if constexpr (kStoresValues) local_values.reserve(keys);
+    for (size_t idx = begin; idx < end; idx++) {
       if (data_[idx] != EMPTY_SLOT) {
         local_keys.push_back(data_[idx]);
         if constexpr (kStoresValues) local_values.push_back(std::move(vals_[idx]));
@@ -494,31 +694,36 @@ class BasicGappedArray {
       if constexpr (kStoresValues) vals_[idx] = V();
     }
 
+    const size_t slots = end - begin;
     std::vector<int64_t> local_positions(local_keys.size());
-    int64_t last_slot = static_cast<int64_t>(phys_lo) - 1;
+    int64_t last_slot = static_cast<int64_t>(begin) - 1;
     for (size_t i = 0; i < local_keys.size(); i++) {
-      int64_t target =
-          static_cast<int64_t>(phys_lo) +
-          static_cast<int64_t>((static_cast<double>(i) * static_cast<double>(region_capacity)) /
-                                static_cast<double>(local_keys.size()));
+      int64_t target = static_cast<int64_t>(begin) +
+                       static_cast<int64_t>((static_cast<double>(i) * static_cast<double>(slots)) /
+                                            static_cast<double>(local_keys.size()));
       if (target <= last_slot) target = last_slot + 1;
-      target = std::min<int64_t>(target, static_cast<int64_t>(phys_hi_exclusive) - 1);
+      target = std::min<int64_t>(target, static_cast<int64_t>(end) - 1);
       data_[target] = local_keys[i];
       if constexpr (kStoresValues) vals_[target] = std::move(local_values[i]);
       local_positions[i] = target;
       last_slot = target;
     }
 
-    SegmentedModel local_model = build_segmented_model(local_keys, local_positions, eps_);
+    SegmentedModel local_model =
+        build_segmented_model(local_keys, local_positions, eps_, segment_cap(local_keys.size()));
+    model_.segments.erase(model_.segments.begin() + lo, model_.segments.begin() + hi + 1);
+    model_.segments.insert(model_.segments.begin() + lo, local_model.segments.begin(), local_model.segments.end());
+    segment_changes_.erase(segment_changes_.begin() + lo, segment_changes_.begin() + hi + 1);
+    segment_changes_.insert(segment_changes_.begin() + lo, local_model.segments.size(), 0);
+  }
 
-    model_.segments.erase(model_.segments.begin() + si);
-    model_.segments.insert(model_.segments.begin() + si, local_model.segments.begin(),
-                            local_model.segments.end());
-
-    segment_insert_counts_.erase(segment_insert_counts_.begin() + si);
-    segment_insert_counts_.insert(segment_insert_counts_.begin() + si, local_model.segments.size(), 0);
-
-    local_rebalance_count_++;
+  // The segment cap for fitting n keys. Where the cap is what splits
+  // them, the pieces come out about equal: capping 4,160 keys at 4,096
+  // would leave a 64-key segment at the end, small enough that a few
+  // dozen inserts fill its region.
+  static size_t segment_cap(size_t n) {
+    const size_t pieces = (n + kMaxSegmentKeys - 1) / kMaxSegmentKeys;
+    return (pieces <= 1) ? kMaxSegmentKeys : (n + pieces - 1) / pieces;
   }
 };
 

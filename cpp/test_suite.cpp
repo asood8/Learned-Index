@@ -5,6 +5,7 @@
 // elements, boundary keys, duplicate inserts, and larger randomized
 // stress runs with fresh seeds.
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
@@ -213,6 +214,47 @@ void test_optimal_segmentation() {
   check(optimal.segments.size() <= pinned.segments.size(), "optimal model never needs more segments than pinned");
 }
 
+// The model only picks where a lookup starts, so a lookup has to give
+// the same answer from any starting slot. lower_bound_from() takes the
+// start as an argument, which lets this try thousands of them, including
+// terrible ones. A terrible start also has to stay cheap: the step-by-step
+// walk hands off to a galloping search, so the cost grows with log n,
+// not n.
+void test_lookup_from_any_start() {
+  std::printf("-- lookups from any starting slot --\n");
+  std::mt19937_64 rng(777);
+  std::vector<int64_t> keys;
+  int64_t k = 0;
+  for (int i = 0; i < 200000; i++) keys.push_back(k += 1 + static_cast<int64_t>(rng() % 20));
+  GappedArray ga = GappedArray::build(keys, 0.7, 64);
+  // punch holes and add new keys, so the array isn't a clean fresh layout
+  for (int i = 0; i < 20000; i++) ga.remove(keys[rng() % keys.size()]);
+  for (int i = 0; i < 20000; i++) ga.insert(static_cast<int64_t>(rng() % static_cast<uint64_t>(keys.back() + 100)));
+
+  const int64_t n = static_cast<int64_t>(ga.capacity());
+  bool same_answer = true;
+  for (int t = 0; t < 200000; t++) {
+    const int64_t target = static_cast<int64_t>(rng() % static_cast<uint64_t>(keys.back() + 200));
+    const int64_t start = static_cast<int64_t>(rng() % static_cast<uint64_t>(n + 1));
+    if (ga.lower_bound_from(start, target) != ga.lower_bound_index(target)) same_answer = false;
+  }
+  check(same_answer, "200k random starting slots: same answer as starting from the model's guess");
+
+  // the worst starts: the wrong end of the array
+  int worst = 0;
+  for (int t = 0; t < 1000; t++) {
+    const int64_t hi_key = keys.back() - static_cast<int64_t>(rng() % 1000);
+    const int64_t lo_key = static_cast<int64_t>(rng() % 1000);
+    int probes = 0;
+    ga.lower_bound_from(0, hi_key, &probes);
+    worst = std::max(worst, probes);
+    ga.lower_bound_from(n, lo_key, &probes);
+    worst = std::max(worst, probes);
+  }
+  std::printf("    (worst start over %lld slots: %d slots examined)\n", static_cast<long long>(n), worst);
+  check(worst <= 300, "starting at the wrong end of the array examines a few hundred slots at most, not all of them");
+}
+
 void test_gapped_array() {
   std::printf("-- Phase 3: gapped array --\n");
 
@@ -361,6 +403,133 @@ void test_gapped_array_values() {
   check(rebalances > 0, "rebalances actually happened during those trials");
 }
 
+// Inserts used to cost O(n). A full rebuild ran every 512 inserts
+// whatever the array's size; another ran whenever the last region
+// filled up, which appending keys larger than all the others does
+// constantly; and on perfectly linear keys one segment covered
+// everything, so refreshing that segment rebuilt the whole array. Each
+// count below was in the dozens or hundreds before.
+void test_insert_costs() {
+  std::printf("-- inserts without full rebuilds --\n");
+  std::mt19937_64 rng(31337);
+  size_t idx;
+
+  std::vector<int64_t> keys;
+  int64_t k = 0;
+  for (int i = 0; i < 200000; i++) keys.push_back(k += 1 + static_cast<int64_t>(rng() % 100));
+  GappedArray random_ga = GappedArray::build(keys, 0.7, 64);
+  std::vector<int64_t> added;
+  for (int i = 0; i < 20000; i++) {
+    added.push_back(static_cast<int64_t>(rng() % static_cast<uint64_t>(keys.back())));
+    random_ga.insert(added.back());
+  }
+  bool all_found = true;
+  for (int64_t key : keys) all_found = all_found && random_ga.search(key, idx);
+  for (int64_t key : added) all_found = all_found && random_ga.search(key, idx);
+  std::printf("    (20k random inserts: %zu full rebuilds, %zu local)\n", random_ga.rebalance_count(),
+              random_ga.local_rebalance_count());
+  check(all_found && random_ga.rebalance_count() <= 2,
+        "20k random inserts into 200k keys: all found, at most 2 full rebuilds");
+
+  std::vector<int64_t> expected;
+  for (int64_t i = 0; i < 1000; i++) expected.push_back(i * 7);
+  GappedArray append_ga = GappedArray::build(expected, 0.7, 64);
+  for (int64_t i = 1000; i < 101000; i++) {
+    append_ga.insert(i * 7);
+    expected.push_back(i * 7);
+  }
+  std::printf("    (100k appends: %zu full rebuilds, %zu local)\n", append_ga.rebalance_count(),
+              append_ga.local_rebalance_count());
+  check(append_ga.range_scan_keys(INT64_MIN, INT64_MAX - 1) == expected && append_ga.rebalance_count() <= 2,
+        "100k appends past the end: all present and in order, at most 2 full rebuilds");
+
+  BasicGappedArray<std::string> rows = BasicGappedArray<std::string>::build({}, 0.7, 64);
+  for (int64_t id = 1; id <= 50000; id++) rows.insert(id, "row_" + std::to_string(id));
+  bool values_ok = rows.size() == 50000;
+  std::string v;
+  for (int64_t id = 1; id <= 50000; id++) values_ok = values_ok && rows.get(id, v) && v == "row_" + std::to_string(id);
+  check(values_ok && rows.rebalance_count() <= 2,
+        "50k auto-increment ids into an empty array: every value intact, at most 2 full rebuilds");
+
+  std::vector<int64_t> linear;
+  for (int64_t i = 0; i < 100000; i++) linear.push_back(i);
+  GappedArray linear_ga = GappedArray::build(linear, 0.7, 64);
+  const size_t cap = GappedArray::kMaxSegmentKeys;
+  check(linear_ga.segment_count() == (linear.size() + cap - 1) / cap,
+        "perfectly linear keys: one line fits them all, but no segment covers more than kMaxSegmentKeys");
+}
+
+// Each insert is counted against every segment whose keys it moved, so a
+// key the model was fit on stays within 2*eps of its prediction: eps
+// from the fit, and less than eps of drift before the segment is
+// refreshed. Shifts that crossed into a neighboring segment used to go
+// uncounted, and only the full rebuild every 512 inserts reset the drift.
+//
+// Crossings happen next to a segment boundary, so two of the four insert
+// patterns aim at one: on evenly spaced keys every segment is exactly
+// kMaxSegmentKeys long (see test_insert_costs), which puts a boundary at
+// a known key. Usually the gap search takes whichever side has the
+// nearer gap, and that alone keeps a neighbor's drift to about eps
+// (without the counting, these patterns peak at ~1.6 eps). What lets a
+// shift keep pushing into a neighbor is a long run of gaps on the
+// neighbor's side, so each boundary pattern first removes 300 keys there.
+// Inserts just below the boundary then push the next segment's first key
+// right through the run, and inserts just above it push the previous
+// segment's last key left. The other two patterns insert anywhere and
+// past the end, on irregular keys. Some removes are mixed in, and every
+// key is checked every 250 operations.
+void test_drift_bound() {
+  std::printf("-- drift between refits --\n");
+  int bad_trials = 0;
+  double worst = 0;  // largest |prediction - slot| seen, in units of eps
+  for (int t = 0; t < 48; t++) {
+    std::mt19937_64 rng(4200 + t);
+    const int64_t eps = std::vector<int64_t>{4, 16, 64}[t % 3];
+    const int pattern = (t / 3) % 4;  // 0: just below a boundary, 1: just above it, 2: anywhere, 3: past the end
+    std::vector<int64_t> original;
+    int64_t k = 0;
+    for (size_t i = 0; i < 3 * GappedArray::kMaxSegmentKeys; i++) {
+      original.push_back(k += (pattern < 2) ? 100000 : 100000 + static_cast<int64_t>(rng() % 1000000));
+    }
+    GappedArray ga = GappedArray::build(original, 0.7, eps);
+    const size_t b = GappedArray::kMaxSegmentKeys;
+    const int64_t boundary = original[b];  // first key of the second segment
+    std::vector<bool> removed(original.size(), false);
+    for (size_t i = 0; i < 300 && pattern < 2; i++) {
+      const size_t r = (pattern == 0) ? b + 1 + i : b - 2 - i;  // above the boundary, or below its last key
+      ga.remove(original[r]);
+      removed[r] = true;
+    }
+    bool ok = true;
+    for (int op = 1; op <= 2000 && ok; op++) {
+      if (rng() % 10 == 0) {
+        const size_t r = rng() % original.size();
+        ga.remove(original[r]);
+        removed[r] = true;
+      } else if (pattern == 0) {
+        ga.insert(boundary - 1 - static_cast<int64_t>(rng() % 99999));
+      } else if (pattern == 1) {
+        ga.insert(boundary + 1 + static_cast<int64_t>(rng() % 99999));
+      } else if (pattern == 2) {
+        ga.insert(static_cast<int64_t>(rng() % static_cast<uint64_t>(original.back())));
+      } else {
+        ga.insert(original.back() + op * 1000 + static_cast<int64_t>(rng() % 1000));
+      }
+      if (op % 250 != 0) continue;
+      for (size_t i = 0; i < original.size(); i++) {
+        if (removed[i]) continue;
+        const GappedSearchDiagnostics d = ga.search_explain(original[i]);
+        const double err = std::abs(static_cast<double>(d.predicted_position) - static_cast<double>(d.index));
+        worst = std::max(worst, err / static_cast<double>(eps));
+        if (!d.found || err > 2.0 * static_cast<double>(eps)) ok = false;
+      }
+    }
+    if (!ok) bad_trials++;
+  }
+  std::printf("    (worst error over all checks: %.2f x eps)\n", worst);
+  check(bad_trials == 0, "48 trials: every key the model was fit on stays within 2*eps of its prediction");
+}
+
 // Checkpointing: the whole store goes into a snapshot and the log is
 // emptied. Every case restarts from disk and compares the result with a
 // std::map that saw the same writes.
@@ -474,6 +643,43 @@ void test_checkpointing() {
   DurableStore::destroy(path);
 }
 
+// Startup folds the log into its final state and builds the array once,
+// instead of replaying each record through insert(). Writes go to a few
+// keys over and over, so most of them overwrite or delete a key written
+// before, and each trial restarts from a log alone, a snapshot alone, and
+// a snapshot with a log on top, checked against a std::map each time.
+void test_replay() {
+  std::printf("-- log replay --\n");
+  const std::string path = "results/test_replay.wal";
+  using Pairs = std::vector<std::pair<int64_t, std::string>>;
+  int bad_restarts = 0;
+  for (int t = 0; t < 6; t++) {
+    std::mt19937_64 rng(600 + t);
+    const int64_t eps = (t % 2 == 0) ? 4 : 64;
+    std::map<int64_t, std::string> truth;
+    DurableStore::destroy(path);
+    for (int round = 0; round < 4; round++) {
+      DurableStore s(path, 0.7, eps, 0);
+      if (s.range_scan(INT64_MIN, INT64_MAX - 1) != Pairs(truth.begin(), truth.end())) bad_restarts++;
+      if (round == 3) break;
+      for (int op = 0; op < 100; op++) {
+        const int64_t key = static_cast<int64_t>(rng() % 40);
+        if (rng() % 3 == 0) {
+          s.remove(key);
+          truth.erase(key);
+        } else {
+          const std::string v = "v" + std::to_string(rng() % 1000);
+          s.put(key, v);
+          truth[key] = v;
+        }
+      }
+      if (round == 1) s.checkpoint();
+    }
+  }
+  check(bad_restarts == 0, "6 trials x 4 restarts: the store comes back exactly as written, with and without a snapshot");
+  DurableStore::destroy(path);
+}
+
 // Crash recovery for the write-ahead log. Each case writes a real log
 // through DurableStore, damages the file the way a crash or a bad disk
 // can, and restarts from it.
@@ -568,9 +774,13 @@ int main() {
   test_segmented_model();
   test_optimal_segmentation();
   test_gapped_array();
+  test_lookup_from_any_start();
   test_untrained_keys();
   test_gapped_array_values();
+  test_insert_costs();
+  test_drift_bound();
   test_checkpointing();
+  test_replay();
   test_wal_recovery();
 
   std::printf("\n%d/%d tests passed\n", tests_passed, tests_run);

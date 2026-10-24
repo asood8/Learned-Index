@@ -23,15 +23,18 @@ secondary indexes, `EXPLAIN`, crash recovery, checkpointing, and a REPL.
 
 ## Results
 
-All of these are from real runs on 1M keys, done in one session on a
-machine with nothing else running. Lookup times are the median of five
-runs, and everything else is the median of three.
+All of these are from real runs on 1M keys. Most come from one session
+on a machine with nothing else running, where lookup times are the
+median of five runs and everything else is the median of three. The
+row for lookups inside the database was measured later with a better
+benchmark, and on a busier machine; "Inside the database" below has
+the details.
 
 | | result |
 |---|---|
 | Point lookup, uniform keys | 113.6 ns (B+-tree: 301.7 ns, binary search: 178.7 ns) |
 | Point lookup, skewed keys | 117.7 ns (B+-tree: 319.1 ns, binary search: 185.2 ns) |
-| The same lookup inside the database | 142.0 ns uniform, 147.3 ns skewed, using the gapped array the database actually runs on |
+| The same lookup inside the database | about 150 ns (148.3 uniform, 154.5 skewed), about 2.2x faster than the B+-tree in the same runs |
 | Index memory | 0.001–0.010 bytes per key, vs about 37.3 for the B+-tree |
 | Inserts | 20,211 ns, about 12x faster than inserting into a plain sorted vector |
 | vs. the published PGM-index | slower on uniform data (124.0 vs 89.5 ns), about even on skewed (116.7 vs 114.0 ns) |
@@ -48,11 +51,13 @@ roughly 37 bytes per key no matter how large it gets, while the model's
 size depends only on how many segments it needs. A million uniform keys
 need 84 segments, so the whole model is a couple of kilobytes.
 
-Lookups inside the database are slower than lookups on the bare index
-(142.0 ns vs 113.6). The database has to leave empty slots in the array
-for inserts, and its model gets a little less accurate with every insert
-until it's rebuilt. I think 142.0 ns is the more honest number to quote,
-and it's one that most projects like this don't measure.
+Lookups inside the database are slower than lookups on the bare index,
+about 15–20% when the two are measured side by side (148.3 ns vs 123.4
+on uniform data). The database has to leave empty slots in the array
+for inserts, and its model gets a little less accurate with every
+insert until it's rebuilt. I think the database number is the more
+honest one to quote, and it's one that most projects like this don't
+measure.
 
 The comparison with PGM-index didn't go my way. PGM is clearly faster on
 uniform data and about even on skewed data, and it uses fewer segments
@@ -155,6 +160,20 @@ Since the array is sorted, the walk finds the right answer no matter
 what the model predicted. The model only changes how far it has to go.
 That ended up mattering a lot, and the bugs section explains what
 happened back when correctness depended on the model.
+
+Walking one slot at a time is fast when the guess is close, but a very
+bad guess used to mean a very long walk, O(n) in the worst case. So
+the walk now goes at most eps slots in each direction. That's the
+model's own error bound, so if the answer still isn't there, the model
+is clearly off. At that point the search switches to galloping: it
+jumps 1, 2, 4, 8, ... slots until it passes the answer, then does a
+binary search inside the last jump, which takes O(log n) steps.
+Starting a lookup at the wrong end of a 1.3M-slot array went from
+about 607,000 ns to about 180 ns, and normal lookups cost the same as
+before. I also tried galloping sooner, since the average walk is about
+25 slots, but that made normal lookups slower (157 vs 134 ns when
+galloping from the first step). Stepping through neighboring slots
+stays in the same cache lines, while a binary search jumps around.
 
 ### Fitting segments
 
@@ -338,22 +357,36 @@ Everything above times the index on its own. The database uses the
 gapped array with inserts, so it has to deal with empty slots and a
 model that drifts. `cpp/benchmark_db_lookups.cpp` measures that path
 against the same baselines, before and after inserting 100k keys.
+These numbers are medians of three runs of seven passes each. They
+were measured on a busier machine than the rest of this README, so
+they run 10–20% higher across the board; compare them with each other,
+not with the tables above.
 
-| 1M keys, uniform | fresh | after 100k inserts |
-|---|---|---|
-| binary search | 168.0 ns | 178.2 ns |
-| B+-tree | 285.5 ns | 291.6 ns |
-| read-only segmented model | 110.1 ns | 122.0 ns |
-| gapped array (the database) | 162.5 ns | 142.0 ns |
+| 1M keys | uniform, fresh | uniform, after inserts | skewed, fresh | skewed, after inserts |
+|---|---|---|---|---|
+| binary search | 188.1 ns | 191.5 ns | 178.9 ns | 188.1 ns |
+| B+-tree | 330.3 ns | 383.3 ns | 330.2 ns | 336.1 ns |
+| read-only segmented model | 123.4 ns | 135.7 ns | 136.1 ns | 139.5 ns |
+| gapped array (the database) | 148.3 ns | 154.9 ns | 154.5 ns | 152.3 ns |
 
-So a real lookup in the database is about 1.9–2x faster than the
-B+-tree, not the 2.7x the read-only index gets. Lookups for keys that
-don't exist cost about the same as ones that find something, since the
-walk does the same amount of work either way. One thing I haven't
-figured out yet: on uniform data, the freshly built array is slower than
-the same array after 100,000 inserts (162.5 vs 142.0 ns). The inserts
-trigger rebalances that refit the model, so the layout afterward might
-just be easier to predict, but I haven't confirmed that.
+So a real lookup in the database is about 2.1–2.5x faster than the
+B+-tree, and a bit faster than binary search, but slower than the
+read-only index. Lookups for keys that don't exist cost about the same
+as ones that find something (153.4 and 164.7 ns, fresh), since the
+walk does the same amount of work either way.
+
+An earlier version of this benchmark said the array got *faster* after
+100,000 inserts (162.5 vs 142.0 ns), and I couldn't explain it. It
+turned out not to be real. The inserts don't change how well the
+model predicts: the average walk was 25.1 slots before and after, and
+the average guess was off by 22.3 slots before and 22.4 after. What
+changed was *when* each one was measured. The old benchmark timed one
+structure after another, and that alone moves results a lot here: the
+exact same array, with the same queries, took 126.1 ns early in a run
+and 142.1 ns later in the same run. Timed alternately, the array after
+inserts was about 4% slower (142.8 vs 137.1 ns), which fits it being
+11% bigger. The benchmark now takes turns between the structures on
+every pass, which is where the table above comes from.
 
 ### Durability
 
@@ -499,9 +532,11 @@ out, and never committed it.
 The real fix was to stop relying on the model for correctness. All four
 functions now use the walk described above, which is correct no matter
 how bad the prediction is, and there's a clamp that keeps a segment from
-predicting past the start of the next one. The worst case is still an
-O(n) walk if the model is very wrong, but a slow lookup is a lot better
-than a wrong one.
+predicting past the start of the next one. At that point the worst
+case was still an O(n) walk if the model was very wrong, which is a lot
+better than a wrong answer. Later I capped the walk and added the
+galloping search described above, which brought the worst case down to
+O(log n).
 
 ### The write-ahead log could lose writes after a crash
 
@@ -558,8 +593,11 @@ piece of code, so there's only one place for that logic to be wrong.
 
 ## Testing
 
-- 41 storage engine tests, 20 parser tests, and 79 end-to-end SQL tests,
+- 43 storage engine tests, 20 parser tests, and 79 end-to-end SQL tests,
   all passing.
+- A test that starts lookups from 200,000 random slots, including the
+  worst possible ones, and checks that every one gives the same answer
+  as a normal lookup and that even the worst start stays cheap.
 - Randomized tests against reference data structures: the gapped array's
   contents against a `std::map`, insert and delete sequences with
   outliers against a `std::set`, and the optimal segmenter against a
@@ -590,8 +628,9 @@ Most of these are on purpose:
 - Keys are packed into 64 bits: 16 bits for the table id and 48 for the
   primary key, or 20 bits for the value and 28 for the primary key
   inside a secondary index. Values outside those ranges are rejected.
-- A lookup can be O(n) in the worst case if the model is very wrong.
-  That only affects speed, not correctness.
+- A lookup is O(log n) in the worst case, plus any run of empty slots
+  it has to skip. Deletes can leave long runs of empty slots until the
+  next rebalance cleans them up.
 - A checkpoint rewrites the whole store, so the write that triggers one
   is slow. A production database would do that in the background.
 - `EXPLAIN` only works with `SELECT`.

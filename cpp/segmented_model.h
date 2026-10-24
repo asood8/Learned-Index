@@ -44,8 +44,14 @@ struct SegmentedModel {
 // same fitting logic, just handing it gapped-array slot numbers
 // instead -- the segmentation algorithm itself doesn't care what the
 // positions mean, only that they're numbers to predict.
+//
+// max_keys caps how many keys one segment may cover. The gapped array
+// sets it: it refreshes a segment by re-laying the segment's whole
+// region, so on perfectly linear keys (where one line fits everything)
+// an uncapped segment made every refresh a rebuild of the whole array.
 SegmentedModel build_segmented_model(const std::vector<int64_t>& keys,
-                                      const std::vector<int64_t>& positions, int64_t eps) {
+                                      const std::vector<int64_t>& positions, int64_t eps,
+                                      size_t max_keys = SIZE_MAX) {
   SegmentedModel model;
   model.eps = eps;
   const size_t n = keys.size();
@@ -60,7 +66,7 @@ SegmentedModel build_segmented_model(const std::vector<int64_t>& keys,
     double slope_max = std::numeric_limits<double>::infinity();
     size_t j = i;  // last index successfully included in this segment
 
-    for (size_t k = i + 1; k < n; k++) {
+    for (size_t k = i + 1; k < n && k - i < max_keys; k++) {
       const double dx = static_cast<double>(keys[k] - anchor_x);
       const double dy = static_cast<double>(positions[k] - anchor_y);
 

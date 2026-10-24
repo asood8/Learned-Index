@@ -14,3 +14,83 @@ data/skewed_1000000.bin,after_inserts,binary search (rebuilt array),175.493,-1
 data/skewed_1000000.bin,after_inserts,B+-tree,281.562,-1
 data/skewed_1000000.bin,after_inserts,Phase 2 model (rebuilt),134.743,-1
 data/skewed_1000000.bin,after_inserts,gapped array (what the db uses),147.302,-1
+data/uniform_1000000.bin,fresh,binary search,174.815,179.365
+data/uniform_1000000.bin,fresh,B+-tree,308.139,286.352
+data/uniform_1000000.bin,fresh,Phase 2 model, dense array,116.901,120.231
+data/uniform_1000000.bin,fresh,gapped array (what the db uses),143.898,147.516
+data/uniform_1000000.bin,after_inserts,binary search (rebuilt array),183.562,-1
+data/uniform_1000000.bin,after_inserts,B+-tree,316.459,-1
+data/uniform_1000000.bin,after_inserts,Phase 2 model (rebuilt),117.776,-1
+data/uniform_1000000.bin,after_inserts,gapped array (what the db uses),142.336,-1
+data/skewed_1000000.bin,fresh,binary search,177.159,180.695
+data/skewed_1000000.bin,fresh,B+-tree,313.174,288.243
+data/skewed_1000000.bin,fresh,Phase 2 model, dense array,123.861,122.464
+data/skewed_1000000.bin,fresh,gapped array (what the db uses),163.607,149.029
+data/skewed_1000000.bin,after_inserts,binary search (rebuilt array),188.381,-1
+data/skewed_1000000.bin,after_inserts,B+-tree,323.114,-1
+data/skewed_1000000.bin,after_inserts,Phase 2 model (rebuilt),138.094,-1
+data/skewed_1000000.bin,after_inserts,gapped array (what the db uses),162.113,-1
+data/uniform_1000000.bin,fresh,binary search,177.163,180.342
+data/uniform_1000000.bin,fresh,B+-tree,359.772,293.737
+data/uniform_1000000.bin,fresh,Phase 2 model, dense array,124.001,142.573
+data/uniform_1000000.bin,fresh,gapped array (what the db uses),147.881,150.939
+data/uniform_1000000.bin,after_inserts,binary search (rebuilt array),195.65,-1
+data/uniform_1000000.bin,after_inserts,B+-tree,300.562,-1
+data/uniform_1000000.bin,after_inserts,Phase 2 model (rebuilt),129.21,-1
+data/uniform_1000000.bin,after_inserts,gapped array (what the db uses),151.63,-1
+data/skewed_1000000.bin,fresh,binary search,182.682,176.599
+data/skewed_1000000.bin,fresh,B+-tree,302.383,275.599
+data/skewed_1000000.bin,fresh,Phase 2 model, dense array,142.681,126.243
+data/skewed_1000000.bin,fresh,gapped array (what the db uses),155.487,163.854
+data/skewed_1000000.bin,after_inserts,binary search (rebuilt array),207.939,-1
+data/skewed_1000000.bin,after_inserts,B+-tree,398.791,-1
+data/skewed_1000000.bin,after_inserts,Phase 2 model (rebuilt),185.653,-1
+data/skewed_1000000.bin,after_inserts,gapped array (what the db uses),166.959,-1
+data/uniform_1000000.bin,fresh,binary search,182.271,182.384
+data/uniform_1000000.bin,fresh,B+-tree,315.058,280.758
+data/uniform_1000000.bin,fresh,Phase 2 model, dense array,123.402,117.08
+data/uniform_1000000.bin,fresh,gapped array (what the db uses),139.41,156.362
+data/uniform_1000000.bin,after_inserts,binary search (rebuilt array),186.644,-1
+data/uniform_1000000.bin,after_inserts,B+-tree,352.862,-1
+data/uniform_1000000.bin,after_inserts,Phase 2 model (rebuilt),135.72,-1
+data/uniform_1000000.bin,after_inserts,gapped array (what the db uses),154.879,-1
+data/uniform_1000000.bin,fresh,binary search,190.399,192.463
+data/uniform_1000000.bin,fresh,B+-tree,341.578,294.78
+data/uniform_1000000.bin,fresh,Phase 2 model, dense array,131.441,133.191
+data/uniform_1000000.bin,fresh,gapped array (what the db uses),162.176,153.363
+data/uniform_1000000.bin,after_inserts,binary search (rebuilt array),218.029,-1
+data/uniform_1000000.bin,after_inserts,B+-tree,389.264,-1
+data/uniform_1000000.bin,after_inserts,Phase 2 model (rebuilt),145.674,-1
+data/uniform_1000000.bin,after_inserts,gapped array (what the db uses),176.294,-1
+data/uniform_1000000.bin,fresh,binary search,188.078,182.958
+data/uniform_1000000.bin,fresh,B+-tree,330.29,291.117
+data/uniform_1000000.bin,fresh,Phase 2 model, dense array,121.579,123.221
+data/uniform_1000000.bin,fresh,gapped array (what the db uses),148.332,147.001
+data/uniform_1000000.bin,after_inserts,binary search (rebuilt array),191.46,-1
+data/uniform_1000000.bin,after_inserts,B+-tree,383.27,-1
+data/uniform_1000000.bin,after_inserts,Phase 2 model (rebuilt),129.014,-1
+data/uniform_1000000.bin,after_inserts,gapped array (what the db uses),148.57,-1
+data/skewed_1000000.bin,fresh,binary search,185.372,177.628
+data/skewed_1000000.bin,fresh,B+-tree,301.542,281.733
+data/skewed_1000000.bin,fresh,Phase 2 model, dense array,136.904,129.875
+data/skewed_1000000.bin,fresh,gapped array (what the db uses),164.972,153.554
+data/skewed_1000000.bin,after_inserts,binary search (rebuilt array),188.14,-1
+data/skewed_1000000.bin,after_inserts,B+-tree,333.079,-1
+data/skewed_1000000.bin,after_inserts,Phase 2 model (rebuilt),133.958,-1
+data/skewed_1000000.bin,after_inserts,gapped array (what the db uses),152.272,-1
+data/skewed_1000000.bin,fresh,binary search,177.294,177.49
+data/skewed_1000000.bin,fresh,B+-tree,332.369,309.585
+data/skewed_1000000.bin,fresh,Phase 2 model, dense array,132.816,132.06
+data/skewed_1000000.bin,fresh,gapped array (what the db uses),154.525,174.991
+data/skewed_1000000.bin,after_inserts,binary search (rebuilt array),182.063,-1
+data/skewed_1000000.bin,after_inserts,B+-tree,336.128,-1
+data/skewed_1000000.bin,after_inserts,Phase 2 model (rebuilt),139.548,-1
+data/skewed_1000000.bin,after_inserts,gapped array (what the db uses),157.062,-1
+data/skewed_1000000.bin,fresh,binary search,178.875,180.072
+data/skewed_1000000.bin,fresh,B+-tree,330.249,275.514
+data/skewed_1000000.bin,fresh,Phase 2 model, dense array,136.133,135.348
+data/skewed_1000000.bin,fresh,gapped array (what the db uses),154.082,164.732
+data/skewed_1000000.bin,after_inserts,binary search (rebuilt array),188.298,-1
+data/skewed_1000000.bin,after_inserts,B+-tree,337.247,-1
+data/skewed_1000000.bin,after_inserts,Phase 2 model (rebuilt),141.07,-1
+data/skewed_1000000.bin,after_inserts,gapped array (what the db uses),150.53,-1
