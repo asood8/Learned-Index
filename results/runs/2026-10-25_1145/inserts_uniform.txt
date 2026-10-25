@@ -1,0 +1,8 @@
+== data/uniform_1000000.bin (1000000 keys) ==
+order       gapped array      B+-tree    tlx 256 B    tlx 512 B   gapped array refreshes
+sorted             302.1        127.0        140.7        127.3   1230 (0 widened), 0 full rebuilds; 39 slots re-laid per insert; 77.8% full afterwards
+shuffled           389.3        424.5        327.4        291.7   1370 (0 widened), 0 full rebuilds; 49 slots re-laid per insert; 77.8% full afterwards
+append             586.4         71.4         45.7         52.6   1578 (0 widened), 0 full rebuilds; 58 slots re-laid per insert; 70.7% full afterwards
+spread             384.9        426.1        418.0        321.5   1353 (0 widened), 0 full rebuilds; 48 slots re-laid per insert; 77.8% full afterwards
+
+plain sorted vector, for context: 260051.6 ns/insert (a 500-insert sample, O(n) each)

@@ -1,0 +1,8 @@
+== data/sosd_osm_10000000.bin (10000000 keys) ==
+order       gapped array      B+-tree    tlx 256 B    tlx 512 B   gapped array refreshes
+sorted             214.8        130.3        163.3        135.3   3789 (0 widened), 0 full rebuilds; 4 slots re-laid per insert; 77.8% full afterwards
+shuffled           444.8        738.0        674.6        560.6   3890 (0 widened), 0 full rebuilds; 5 slots re-laid per insert; 77.8% full afterwards
+append             568.7         80.1         54.8         42.2   17349 (685 widened), 0 full rebuilds; 41 slots re-laid per insert; 71.4% full afterwards
+spread            1276.5        430.3        317.0        288.7   8495 (1814 widened), 0 full rebuilds; 85 slots re-laid per insert; 77.8% full afterwards
+
+plain sorted vector, for context: 7027050.6 ns/insert (a 500-insert sample, O(n) each)

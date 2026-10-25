@@ -293,9 +293,10 @@ The borrowing has a cost when inserts don't follow the data. Skewed data
 leaves a few segments that cover most of the key range but hold few keys.
 Inserts spread evenly over the key range pour into those small regions,
 which fill almost at once and keep borrowing from their neighbors. On 1M
-skewed keys, that re-lays 131 slots per insert instead of the usual 49,
-and the inserts take 948 ns instead of 403. A B+-tree only splits the
-leaf that's full, so it doesn't care where inserts land.
+skewed keys, that re-lays 161 slots per insert instead of the usual 49,
+and the inserts take 1,110 ns instead of 395 (the "spread" rows under
+Inserts below). A B+-tree only splits the leaf that's full, so it
+doesn't care where inserts land.
 
 ### Crash recovery
 
@@ -556,6 +557,24 @@ between 30% faster and 2% slower. Appends are its worst case: a B+-tree
 only touches its last leaf, while the gapped array keeps shifting keys
 at its end and refreshing its last segment. That matters for a
 database, since auto-increment primary keys are common.
+
+A later run of just this benchmark (`results/runs/2026-10-25_1145/`)
+added a fourth order, "spread": the same number of new keys, drawn
+evenly from the whole key range instead of from the data.
+
+| ns per insert, random order (gapped array / tlx, 512-byte nodes) | keys from the data | keys spread evenly | slots re-laid per insert |
+|---|---|---|---|
+| uniform, 1M | 389 / 292 | 385 / 322 | 49 → 48 |
+| skewed, 1M | 395 / 369 | 1,110 / 157 | 49 → 161 |
+| books, 10M | 570 / 546 | 986 / 572 | 47 → 77 |
+| fb, 10M | 456 / 516 | 1,452 / 201 | 3 → 129 |
+| osm, 10M | 445 / 561 | 1,277 / 289 | 5 → 85 |
+| wiki, 10M | 574 / 579 | 1,070 / 436 | 35 → 71 |
+
+On uniform keys the two are the same thing, and so are the numbers.
+Everywhere else, spreading the inserts makes the gapped array 1.7–3.2x
+slower, while tlx stays the same or gets faster, presumably because the
+new keys land in a few leaves that stay in cache.
 
 ### The whole database on each index
 

@@ -18,3 +18,11 @@ __pycache__/
 # OS / editor cruft
 .DS_Store
 *.swp
+
+# LaTeX build output (paper/)
+paper/*.aux
+paper/*.bbl
+paper/*.blg
+paper/*.log
+paper/*.out
+paper/*.pdf
