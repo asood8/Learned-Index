@@ -275,12 +275,36 @@ class BasicGappedArray {
   size_t rebalance_count() const { return rebalance_count_; }
   size_t local_rebalance_count() const { return local_rebalance_count_; }
 
+  // Checks the bookkeeping, for tests: real keys strictly increasing and
+  // as many as size() says, segment start keys strictly increasing, and
+  // every array that runs parallel to another really in step with it.
+  // Lookups only rely on the keys being sorted (see locate()), so a
+  // broken count or a stale segment would make them slower, not wrong,
+  // and has to be checked for on its own.
+  bool consistent() const {
+    const std::vector<Segment>& segs = model_.segments;
+    if (segment_changes_.size() != segs.size()) return false;
+    if (kStoresValues && vals_.size() != data_.size()) return false;
+    for (size_t i = 1; i < segs.size(); i++) {
+      if (segs[i].start_key <= segs[i - 1].start_key) return false;
+    }
+    size_t real = 0;
+    int64_t prev = INT64_MIN;
+    for (int64_t k : data_) {
+      if (k == EMPTY_SLOT) continue;
+      if (real > 0 && k <= prev) return false;
+      prev = k;
+      real++;
+    }
+    return real == count_;
+  }
+
   // No segment covers more keys than this; see build_segmented_model().
   static constexpr size_t kMaxSegmentKeys = 4096;
   // How full a segment's region may get before refreshing it needs room
   // from its neighbors, and how full the whole array may get before it's
   // rebuilt bigger; windows in between get limits in between. See
-  // density_limit().
+  // too_dense().
   static constexpr double kSegmentDensityLimit = 0.9;
   static constexpr double kArrayDensityLimit = 0.8;
 

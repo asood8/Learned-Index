@@ -124,6 +124,30 @@ void test_segmented_model() {
     if (!segmented_search(keys, model, keys[i], v) || v != static_cast<int64_t>(i)) all_found = false;
   }
   check(all_found, "irregularly-spaced data: every key found with correct position");
+
+  // find_segment_index() is a branchless binary search now; it has to
+  // give exactly what std::upper_bound + step back gave, including for
+  // keys equal to a start, below the first one, or past the last, and for
+  // lists of zero or one segment.
+  std::mt19937_64 seg_rng(31);
+  bool same_segment = true;
+  for (int t = 0; t < 2000; t++) {
+    std::vector<Segment> segs;
+    int64_t start = static_cast<int64_t>(seg_rng() % 100) - 50;
+    const size_t count = seg_rng() % 40;
+    for (size_t i = 0; i < count; i++) {
+      segs.push_back({start, 0.0, 0.0});
+      start += 1 + static_cast<int64_t>(seg_rng() % 10);
+    }
+    for (int q = 0; q < 50; q++) {
+      const int64_t key = static_cast<int64_t>(seg_rng() % 600) - 100;
+      const auto it = std::upper_bound(segs.begin(), segs.end(), key,
+                                       [](int64_t k, const Segment& s) { return k < s.start_key; });
+      const size_t want = (it == segs.begin()) ? 0 : static_cast<size_t>(it - segs.begin()) - 1;
+      if (find_segment_index(segs, key) != want) same_segment = false;
+    }
+  }
+  check(same_segment, "segment search: same answer as std::upper_bound on 2,000 random segment lists");
 }
 
 // An exact but slow way to decide whether one line can fit points
@@ -349,7 +373,7 @@ void test_untrained_keys() {
         g.insert(k);
         keys.insert(k);
       }
-      ok = scan_all(g) == std::vector<int64_t>(keys.begin(), keys.end());
+      ok = g.consistent() && scan_all(g) == std::vector<int64_t>(keys.begin(), keys.end());
     }
     size_t idx;
     for (int64_t k : keys) {
@@ -388,7 +412,9 @@ void test_gapped_array_values() {
         ga.insert(k, v);
         truth[k] = v;
       }
-      if (op % 100 == 99) ok = ga.range_scan(INT64_MIN, INT64_MAX - 1) == Pairs(truth.begin(), truth.end());
+      if (op % 100 == 99) {
+        ok = ga.consistent() && ga.range_scan(INT64_MIN, INT64_MAX - 1) == Pairs(truth.begin(), truth.end());
+      }
     }
     std::string v;
     for (const auto& [k, want] : truth) {
@@ -428,7 +454,7 @@ void test_insert_costs() {
   for (int64_t key : added) all_found = all_found && random_ga.search(key, idx);
   std::printf("    (20k random inserts: %zu full rebuilds, %zu local)\n", random_ga.rebalance_count(),
               random_ga.local_rebalance_count());
-  check(all_found && random_ga.rebalance_count() <= 2,
+  check(all_found && random_ga.consistent() && random_ga.rebalance_count() <= 2,
         "20k random inserts into 200k keys: all found, at most 2 full rebuilds");
 
   std::vector<int64_t> expected;
@@ -440,7 +466,8 @@ void test_insert_costs() {
   }
   std::printf("    (100k appends: %zu full rebuilds, %zu local)\n", append_ga.rebalance_count(),
               append_ga.local_rebalance_count());
-  check(append_ga.range_scan_keys(INT64_MIN, INT64_MAX - 1) == expected && append_ga.rebalance_count() <= 2,
+  check(append_ga.consistent() && append_ga.range_scan_keys(INT64_MIN, INT64_MAX - 1) == expected &&
+            append_ga.rebalance_count() <= 2,
         "100k appends past the end: all present and in order, at most 2 full rebuilds");
 
   BasicGappedArray<std::string> rows = BasicGappedArray<std::string>::build({}, 0.7, 64);
@@ -448,7 +475,7 @@ void test_insert_costs() {
   bool values_ok = rows.size() == 50000;
   std::string v;
   for (int64_t id = 1; id <= 50000; id++) values_ok = values_ok && rows.get(id, v) && v == "row_" + std::to_string(id);
-  check(values_ok && rows.rebalance_count() <= 2,
+  check(values_ok && rows.consistent() && rows.rebalance_count() <= 2,
         "50k auto-increment ids into an empty array: every value intact, at most 2 full rebuilds");
 
   std::vector<int64_t> linear;
@@ -516,6 +543,7 @@ void test_drift_bound() {
         ga.insert(original.back() + op * 1000 + static_cast<int64_t>(rng() % 1000));
       }
       if (op % 250 != 0) continue;
+      if (!ga.consistent()) ok = false;
       for (size_t i = 0; i < original.size(); i++) {
         if (removed[i]) continue;
         const GappedSearchDiagnostics d = ga.search_explain(original[i]);

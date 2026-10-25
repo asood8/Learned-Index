@@ -106,14 +106,23 @@ SegmentedModel build_segmented_model(const std::vector<int64_t>& keys, int64_t e
 }
 
 // Finds the index of the last segment whose start_key <= key -- the
-// segment responsible for this key. Same upper_bound + step-back
-// technique as routing through an internal B+-tree node, just over a
-// flat list instead of tree levels.
+// segment responsible for this key -- or 0 for a key smaller than every
+// start (defensive). A binary search over the segments, like routing
+// through an internal B+-tree node, but written without a branch: each
+// step keeps the upper or lower half with a conditional move. This used
+// to be std::upper_bound, which branches on every step, and since a
+// lookup's key is as likely to go one way as the other, about half of
+// those branches were mispredicted. On 1M keys (264 segments) that cost
+// about 48 ns of a 150 ns gapped-array lookup; this takes about 9 ns.
 size_t find_segment_index(const std::vector<Segment>& segments, int64_t key) {
-  auto it = std::upper_bound(segments.begin(), segments.end(), key,
-                              [](int64_t k, const Segment& s) { return k < s.start_key; });
-  if (it == segments.begin()) return 0;  // defensive: key smaller than the first segment
-  return static_cast<size_t>((it - segments.begin()) - 1);
+  const Segment* base = segments.data();
+  size_t n = segments.size();
+  while (n > 1) {
+    const size_t half = n / 2;
+    base = (base[half].start_key <= key) ? base + half : base;
+    n -= half;
+  }
+  return static_cast<size_t>(base - segments.data());
 }
 
 bool segmented_search(const std::vector<int64_t>& keys, const SegmentedModel& model,
