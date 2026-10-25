@@ -41,13 +41,21 @@ def main() -> None:
     for data, metrics in values.items():
         indexes = sorted({i for per in metrics.values() for i in per}, key=lambda i: not i.startswith("learned"))
         rounds = max(len(v) for per in metrics.values() for v in per.values())
-        runs = "1 run each" if rounds == 1 else f"median of {rounds} runs each"
+        runs = "1 run each" if rounds == 1 else f"median of {rounds} runs each, with the lowest and highest"
         out.append(f"### {data} ({runs})\n")
         out.append("| | " + " | ".join(indexes) + " | learned / B+-tree |")
         out.append("|---" * (len(indexes) + 2) + "|")
         for metric in order[data]:
             med = {i: statistics.median(metrics[metric][i]) for i in indexes if metrics[metric][i]}
-            cells = [f"{med[i]:,.1f}" if i in med else "" for i in indexes]
+
+            def cell(i):
+                if i not in med:
+                    return ""
+                v = metrics[metric][i]
+                spread = f" ({min(v):,.0f}–{max(v):,.0f})" if len(v) > 1 else ""
+                return f"{med[i]:,.1f}{spread}"
+
+            cells = [cell(i) for i in indexes]
             learned = next((med[i] for i in med if i.startswith("learned")), None)
             btree = next((med[i] for i in med if i.startswith("B+")), None)
             ratio = f"{learned / btree:.2f}" if learned and btree else ""
