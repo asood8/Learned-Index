@@ -27,3 +27,6 @@ jobs:
 
       - name: Differential test with a tiny error bound, so rebalancing runs constantly
         run: make difftest RUNS=30 EPS=4
+
+      - name: The same database built on a B+-tree instead of the learned index
+        run: make -j4 test-btree && make difftest-btree RUNS=30

@@ -17,6 +17,9 @@
 #include <string>
 #include <vector>
 
+#include <sys/wait.h>
+#include <unistd.h>
+
 #include "bplus_tree.h"
 #include "durable_store.h"
 #include "gapped_array.h"
@@ -796,6 +799,43 @@ void test_wal_recovery() {
   std::remove(path.c_str());
 }
 
+// With sync_every > 1 the log fsyncs only every k-th write, but every
+// record still reaches the OS with write() before put() returns, so a
+// crash of the process (as opposed to the machine) must lose nothing. A
+// child process writes and then dies without running any destructor, so
+// nothing gets synced on the way out, and the parent reopens the log. A
+// power cut, the case batching actually risks, can't be tested this way.
+void test_batched_sync() {
+  std::printf("-- batched fsync --\n");
+  const std::string path = "results/test_batched_sync.wal";
+  DurableStore::destroy(path);
+  const pid_t child = fork();
+  if (child == 0) {
+    DurableStore s(path, 0.7, 64, 0, 1000);  // no write in this run reaches an fsync
+    for (int64_t k = 1; k <= 300; k++) s.put(k, "v" + std::to_string(k));
+    std::_Exit(0);
+  }
+  int status = 0;
+  waitpid(child, &status, 0);
+  {
+    DurableStore s(path, 0.7, 64, 0, 1000);
+    std::string v;
+    bool all = s.size() == 300;
+    for (int64_t k = 1; k <= 300; k++) all = all && s.get(k, v) && v == "v" + std::to_string(k);
+    check(WIFEXITED(status) && WEXITSTATUS(status) == 0 && all,
+          "fsync every 1,000 writes: the process dying after 300 unsynced writes loses none of them");
+    for (int64_t k = 301; k <= 350; k++) s.put(k, "w");
+    s.checkpoint();
+    for (int64_t k = 351; k <= 360; k++) s.put(k, "x");
+  }
+  {
+    DurableStore s(path, 0.7, 64, 0, 1000);
+    check(s.size() == 360 && s.snapshot_entries() == 350 && s.recovered_entries() == 10,
+          "...and a checkpoint plus unsynced writes after it come back after a normal close");
+  }
+  DurableStore::destroy(path);
+}
+
 int main() {
   test_bplus_tree();
   test_linear_model();
@@ -810,6 +850,7 @@ int main() {
   test_checkpointing();
   test_replay();
   test_wal_recovery();
+  test_batched_sync();
 
   std::printf("\n%d/%d tests passed\n", tests_passed, tests_run);
   return (tests_passed == tests_run) ? 0 : 1;

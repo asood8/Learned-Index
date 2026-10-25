@@ -7,6 +7,8 @@
 #   make asan        the same suites under AddressSanitizer + UBSan
 #   make demos       the durability and catalog restart demos
 #   make difftest    compare against SQLite (RUNS=200, EPS=64 by default)
+#   make test-btree  the test suites on a build that uses tlx's B+-tree
+#                    instead of the learned index (difftest-btree likewise)
 #   make data        generate the benchmark datasets (needs numpy)
 #   make all         build every program, benchmarks included
 #   make repl        build and start the SQL shell
@@ -24,7 +26,7 @@ HEADERS  := $(wildcard cpp/*.h) $(wildcard cpp/third_party/pgm/*.hpp) $(wildcard
 PROGRAMS := $(patsubst cpp/%.cpp,$(BUILD)/%,$(wildcard cpp/*.cpp))
 TESTS    := test_suite sql_parser_test executor_test
 
-.PHONY: all test asan demos difftest data repl clean
+.PHONY: all test asan demos difftest test-btree difftest-btree data repl clean
 
 all: $(PROGRAMS)
 
@@ -34,7 +36,11 @@ $(BUILD)/%: cpp/%.cpp $(HEADERS) | $(BUILD) results
 $(BUILD)/asan/%: cpp/%.cpp $(HEADERS) | $(BUILD)/asan results
 	$(CXX) $(SANFLAGS) $(INCLUDES) -o $@ $<
 
-$(BUILD) $(BUILD)/asan results:
+# the same programs with the B+-tree in place of the learned index
+$(BUILD)/btree/%: cpp/%.cpp $(HEADERS) | $(BUILD)/btree results
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -DLIDB_BTREE_INDEX -o $@ $<
+
+$(BUILD) $(BUILD)/asan $(BUILD)/btree results:
 	mkdir -p $@
 
 test: $(addprefix $(BUILD)/,$(TESTS))
@@ -56,6 +62,14 @@ demos: $(BUILD)/durability_demo $(BUILD)/phase8_demo
 
 difftest: $(BUILD)/sql_harness
 	HARNESS_EPS=$(EPS) python3 python/sqlite_diff_test.py --harness $(BUILD)/sql_harness --runs $(RUNS)
+
+test-btree: $(addprefix $(BUILD)/btree/,$(TESTS))
+	./$(BUILD)/btree/test_suite
+	./$(BUILD)/btree/sql_parser_test
+	./$(BUILD)/btree/executor_test
+
+difftest-btree: $(BUILD)/btree/sql_harness
+	python3 python/sqlite_diff_test.py --harness $(BUILD)/btree/sql_harness --runs $(RUNS)
 
 data:
 	python3 python/data_gen.py --n 1000000 --outdir data

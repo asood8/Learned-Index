@@ -110,7 +110,9 @@ int main() {
     auto res = run("EXPLAIN SELECT * FROM users WHERE id = 42;");
     check(res.success, "EXPLAIN point lookup succeeds");
     check(res.explain_text.find("point lookup") != std::string::npos, "EXPLAIN mentions point lookup");
-    check(res.explain_text.find("predicted position") != std::string::npos, "EXPLAIN reports a predicted position");
+    if (DurableStore::kLearnedIndex) {  // a build on the B+-tree has no prediction to report
+      check(res.explain_text.find("predicted position") != std::string::npos, "EXPLAIN reports a predicted position");
+    }
     check(res.explain_text.find("key found") != std::string::npos, "EXPLAIN reports the key was found");
   }
   {

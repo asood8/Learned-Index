@@ -35,6 +35,19 @@
 //   type (1 byte) | key (8) | value length (4) | value | CRC-32 (4)
 // with the CRC covering everything before it in that record. DELETE
 // records have an empty value.
+//
+// Batched fsync. By default every record is fsync'd before the write
+// returns, which costs ~1.5 ms on the laptop this was measured on, and
+// that cost hides everything else a write does. With sync_every = k, only
+// every k-th record is fsync'd (and the log is synced on close and
+// before a checkpoint empties it). Every record still goes to the OS
+// with write() before the call returns, so a crash of this process loses
+// nothing; what's at risk is up to k - 1 acknowledged writes if the
+// machine loses power or the OS crashes before the next fsync. That's
+// the same trade SQLite makes with synchronous=NORMAL. It isn't group
+// commit in the usual sense, where concurrent clients share one fsync
+// and each still waits for it: this database has one client and no
+// multi-statement transactions, so there's nothing to group.
 #pragma once
 
 #include <array>
@@ -100,8 +113,9 @@ class WriteAheadLog {
   // Opens the log, creating it if needed, and recovers it: anything
   // after the last intact record is cut off so new appends start on a
   // clean boundary. Throws if the file exists but isn't a log in this
-  // format, without modifying it.
-  explicit WriteAheadLog(const std::string& path) {
+  // format, without modifying it. sync_every: see "Batched fsync" above.
+  explicit WriteAheadLog(const std::string& path, size_t sync_every = 1)
+      : sync_every_(sync_every == 0 ? 1 : sync_every) {
     fd_ = open(path.c_str(), O_CREAT | O_RDWR | O_APPEND, 0644);
     if (fd_ < 0) throw std::runtime_error("could not open WAL file: " + path);
     try {
@@ -114,19 +128,31 @@ class WriteAheadLog {
   }
 
   ~WriteAheadLog() {
-    if (fd_ >= 0) close(fd_);
+    if (fd_ < 0) return;
+    if (unsynced_ > 0 && fsync(fd_) != 0) {
+      // nothing more a destructor can do; the records did reach the OS
+    }
+    close(fd_);
   }
 
   WriteAheadLog(const WriteAheadLog&) = delete;
   WriteAheadLog& operator=(const WriteAheadLog&) = delete;
 
-  // Appends one record and forces it to disk before returning. fsync
-  // is what actually makes this durable: without it, the write could
-  // still be sitting in an OS buffer, not on the physical disk, when
-  // the process dies. It's also the expensive part, measured back in
-  // Phase 5.
+  // Appends one record and forces it to disk before returning (unless
+  // sync_every > 1, see above). fsync is what actually makes this
+  // durable: without it, the write could still be sitting in an OS
+  // buffer, not on the physical disk, when the machine goes down. It's
+  // also the expensive part, measured back in Phase 5.
   void log_put(int64_t key, const std::string& value) { append(WalRecordType::PUT, key, value); }
   void log_delete(int64_t key) { append(WalRecordType::DELETE, key, std::string()); }
+
+  // Forces any records not yet fsync'd to disk (only ever needed with
+  // sync_every > 1).
+  void sync() {
+    if (unsynced_ == 0) return;
+    if (fsync(fd_) != 0) throw std::runtime_error("WAL fsync failed");
+    unsynced_ = 0;
+  }
 
   // Empties the log back to just its header. Only safe once everything
   // in it is saved somewhere else: DurableStore::checkpoint() calls it
@@ -136,6 +162,7 @@ class WriteAheadLog {
       throw std::runtime_error("could not empty the WAL file");
     }
     size_ = MAGIC_LEN;
+    unsynced_ = 0;
   }
 
   uint64_t size_bytes() const { return size_; }
@@ -155,6 +182,8 @@ class WriteAheadLog {
  private:
   int fd_ = -1;
   uint64_t size_ = 0;  // bytes of intact log on disk
+  size_t sync_every_ = 1;
+  size_t unsynced_ = 0;  // records written since the last fsync
 
   void recover(const std::string& path) {
     struct stat st;
@@ -255,8 +284,8 @@ class WriteAheadLog {
       }
       throw std::runtime_error("WAL write failed");
     }
-    if (fsync(fd_) != 0) throw std::runtime_error("WAL fsync failed");
     size_ += rec.size();
+    if (++unsynced_ >= sync_every_) sync();
   }
 
   bool write_all(const char* data, size_t n) {

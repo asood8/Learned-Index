@@ -193,12 +193,15 @@ class Executor {
       if (stmt.is_explain) {
         if (!representable) {
           result.explain_text = "point lookup -- primary key out of range, key not found";
-        } else {
+        } else if constexpr (DurableStore::kLearnedIndex) {
           GappedArray::SearchDiagnostics diag = store_.get_explain(key);
           result.explain_text = "point lookup via learned index -- predicted position " +
                                  std::to_string(diag.predicted_position) + ", corrected in " +
                                  std::to_string(diag.probes) + (diag.probes == 1 ? " probe, " : " probes, ") +
                                  (diag.found ? "key found" : "key not found");
+        } else {
+          result.explain_text = std::string("point lookup via B+-tree -- ") +
+                                (store_.get_explain(key).found ? "key found" : "key not found");
         }
       }
       std::string raw;
@@ -207,8 +210,9 @@ class Executor {
       result.access_method = "range scan";
       scan_range(*schema, stmt.where.value.int_val, stmt.where.value2.int_val, nullptr, result);
       if (stmt.is_explain) {
-        result.explain_text =
-            "range scan over the gapped array -- returned " + std::to_string(result.rows.size()) + " row(s)";
+        result.explain_text = std::string(DurableStore::kLearnedIndex ? "range scan over the gapped array"
+                                                                      : "range scan over the B+-tree") +
+                              " -- returned " + std::to_string(result.rows.size()) + " row(s)";
       }
     } else if (stmt.where.op == CompareOp::EQ && stmt.where.value.int_val >= 0 &&
                stmt.where.value.int_val <= SECONDARY_VALUE_MASK &&

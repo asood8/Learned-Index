@@ -34,13 +34,30 @@
 #include "gapped_array.h"
 #include "snapshot.h"
 #include "write_ahead_log.h"
+#ifdef LIDB_BTREE_INDEX
+#include "btree_row_index.h"
+#endif
 
 class DurableStore {
  public:
+  // The index the rows live in. Normally the learned index (the gapped
+  // array); building with -DLIDB_BTREE_INDEX swaps in tlx's B+-tree
+  // instead (btree_row_index.h), so the two can be compared inside the
+  // whole database with everything else identical.
+#ifdef LIDB_BTREE_INDEX
+  using RowArray = BTreeRowIndex;
+  static constexpr bool kLearnedIndex = false;
+#else
   using RowArray = BasicGappedArray<std::string>;
+  static constexpr bool kLearnedIndex = true;
+#endif
 
-  DurableStore(const std::string& wal_path, double density, int64_t eps, size_t checkpoint_every = 100000)
-      : wal_(wal_path),
+  // sync_every: fsync the log only on every k-th write. 1 (the default)
+  // makes every write durable before it returns; see write_ahead_log.h
+  // for what a larger value risks.
+  DurableStore(const std::string& wal_path, double density, int64_t eps, size_t checkpoint_every = 100000,
+               size_t sync_every = 1)
+      : wal_(wal_path, sync_every),
         snapshot_path_(wal_path + ".snapshot"),
         checkpoint_every_(checkpoint_every),
         index_(RowArray::build({}, density, eps)) {
@@ -97,6 +114,9 @@ class DurableStore {
     writes_since_checkpoint_ = 0;
     checkpoints_++;
   }
+
+  // Forces writes the log hasn't fsync'd yet to disk (with sync_every > 1).
+  void sync() { wal_.sync(); }
 
   bool get(int64_t key, std::string& out_value) const { return index_.get(key, out_value); }
 

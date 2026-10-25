@@ -1,0 +1,21 @@
+cff-version: 1.2.0
+message: "If you use this code, please cite it as below."
+title: "Learned Index DB: an embedded SQL database with a learned index as its storage engine"
+type: software
+authors:
+  - family-names: Sood
+    given-names: Aadit
+    # orcid: https://orcid.org/0000-0000-0000-0000   (add once you have one)
+repository-code: "https://github.com/asood8/Learned-Index"
+license: MIT
+keywords:
+  - learned index
+  - database
+  - storage engine
+  - B+-tree
+  - packed-memory array
+# When the code is released on Zenodo, add its DOI here, plus the version
+# and date of the tagged release:
+# doi: 10.5281/zenodo.XXXXXXX
+# version: "1.0.0"
+# date-released: "2026-11-01"
