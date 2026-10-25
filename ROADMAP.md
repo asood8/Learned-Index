@@ -5,12 +5,22 @@ An embedded SQL database whose storage engine is a learned index
 architected the same way SQLite is: a SQL front end sitting on top
 of a swappable storage engine.
 
+**A note before reading:** this is the plan and build log as I wrote it
+at each phase, kept for the history. Several of the numbers in it were
+later found to be wrong, and the README has the corrected ones:
+the skewed-data results here (25.7 ns, ~8x over binary search, 2x
+faster than PGM-index) came from a broken dataset generator; the
+"3–4 orders of magnitude" memory result compared the model with the
+B+-tree's whole size, keys and values included; the insert numbers
+hid that inserts had become O(n); and the "~20% from published
+attacks" leaves out attacks that did far more damage.
+
 **Status: ALL PHASES COMPLETE (0–12).** The full roadmap is done — a
 learned-index storage engine (Phases 0–7: segmentation, inserts,
 durability, cooperating learned layers, full benchmarking against the
 real PGM-index) underneath a real SQL front end (Phases 8–12: rows/
 catalog, parser, executor, REPL, EXPLAIN). See `README.md` for the
-complete phase-by-phase writeup, `python/` and `cpp/` for all source,
+writeup, `python/` and `cpp/` for all source,
 `results/` for real benchmark data. Only the optional stretch goals
 and a public writeup remain, and neither is required for this project
 to be finished.
