@@ -31,11 +31,12 @@
 // The model here is still fit with the pinned-anchor
 // build_segmented_model(), not build_optimal_segmented_model(). The
 // optimal fit needs about a quarter fewer segments on this layout (180
-// vs 235 on 1M wide-range lognormal keys), but it took 4-7x longer to
-// fit, and this array refits its whole model on every full rebalance
-// (195 of them per 100k inserts in the Phase 3 benchmark). Switching
-// made inserts about 2.7x slower, in exchange for saving ~1 KB of
-// segments.
+// vs 235 on 1M wide-range lognormal keys), but it takes 4-7x longer to
+// fit, and this array refits a region every few dozen inserts. Before
+// v4, when the whole model was refit every 512 inserts, switching made
+// inserts about 2.7x slower. Measured again after v4, it made them 3-4x
+// slower (1,233-1,717 vs 303-620 ns at 1M keys), with lookups about the
+// same, so it still isn't worth it here.
 //
 // v4: inserts no longer cost O(n). The safety net rebuilt the whole
 // array every 8*eps = 512 inserts whatever its size, and one rebuild
@@ -575,8 +576,8 @@ class BasicGappedArray {
   }
 
   // Refreshes the layout and model from whatever keys are currently
-  // in the array -- the full-array safety net, and the fallback when
-  // a local gap search comes up completely empty.
+  // in the array: the full rebuild, which local_rebalance() falls back to
+  // only when the whole array is too full.
   void rebalance() {
     std::vector<int64_t> all_keys;
     std::vector<V> all_values;

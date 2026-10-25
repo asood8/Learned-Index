@@ -1,9 +1,22 @@
-// Phase 3 benchmark: build the gapped array on 90% of the keys, hold
-// the other 10% out, insert them one at a time, then verify every
-// single key -- original and inserted -- is still findable. Also
-// times a small sample of naive dense-array inserts (with shifting)
-// for comparison; the naive version is O(n) per insert, so only a
-// small sample is timed rather than all of them.
+// Phase 3 benchmark: build on 90% of the keys, insert the other 10% one
+// at a time, then check that every key -- original and inserted -- is
+// still findable. The gapped array is timed next to my B+-tree and tlx's
+// (tlx_baseline.h), in three insert orders:
+//
+//   sorted    the held-out keys, scattered across the whole range, in
+//             increasing order (this benchmark's only order until v4)
+//   shuffled  the same keys in random order
+//   append    the largest 10% of the keys, in increasing order, the way
+//             an auto-increment id arrives
+//
+// Until v4 this only compared the gapped array with inserting into a
+// plain sorted vector, which shifts everything after the insertion point.
+// That baseline is O(n) per insert, so beating it says very little, and
+// it hid that the gapped array's inserts had become O(n) as well (a full
+// rebuild every 512 inserts). The vector is still timed on a small
+// sample, for context.
+//
+// usage: benchmark_inserts <keys.bin>
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
@@ -14,7 +27,9 @@
 #include <string>
 #include <vector>
 
+#include "bplus_tree.h"
 #include "gapped_array.h"
+#include "tlx_baseline.h"
 
 std::vector<int64_t> load_keys(const std::string& path) {
   std::ifstream f(path, std::ios::binary | std::ios::ate);
@@ -28,95 +43,103 @@ std::vector<int64_t> load_keys(const std::string& path) {
   return keys;
 }
 
+template <typename F>
+double ns_per(size_t count, F f) {
+  const auto t0 = std::chrono::steady_clock::now();
+  f();
+  const auto t1 = std::chrono::steady_clock::now();
+  return std::chrono::duration<double, std::nano>(t1 - t0).count() / count;
+}
+
 int main(int argc, char** argv) {
   if (argc < 2) {
     std::fprintf(stderr, "usage: %s <keys.bin>\n", argv[0]);
     return 1;
   }
-  std::string path = argv[1];
-  std::vector<int64_t> all_keys = load_keys(path);
-  size_t n = all_keys.size();
-  std::printf("== %s (%zu keys) ==\n", path.c_str(), n);
-
-  // hold out ~10% of keys (scattered across the whole range, not just
-  // the tail) to insert after the structure is already built
-  std::mt19937_64 rng(7);
-  std::vector<bool> is_holdout(n, false);
-  for (size_t i = 0; i < n; i++) {
-    if (rng() % 10 == 0) is_holdout[i] = true;
-  }
-
-  std::vector<int64_t> initial_keys, holdout_keys;
-  for (size_t i = 0; i < n; i++) {
-    (is_holdout[i] ? holdout_keys : initial_keys).push_back(all_keys[i]);
-  }
-  std::printf("initial: %zu keys, holdout to insert: %zu keys\n", initial_keys.size(),
-              holdout_keys.size());
-
+  const std::string path = argv[1];
+  const std::vector<int64_t> all_keys = load_keys(path);
+  const size_t n = all_keys.size();
   const int64_t eps = 64;
   const double density = 0.7;
-  GappedArray ga = GappedArray::build(initial_keys, density, eps);
-  std::printf("gapped array: %zu keys in %zu slots (%.1f%% full)\n", ga.size(), ga.capacity(),
-              100.0 * ga.size() / ga.capacity());
+  std::printf("== %s (%zu keys) ==\n", path.c_str(), n);
+  std::printf("%-9s %14s %12s %12s %12s   %s\n", "order", "gapped array", "B+-tree", "tlx 256 B", "tlx 512 B",
+              "gapped array rebalances");
 
-  // correctness check: every initial key must be findable before we
-  // trust anything else
-  for (size_t i = 0; i < std::min(initial_keys.size(), static_cast<size_t>(2000)); i++) {
-    size_t idx;
-    if (!ga.search(initial_keys[i], idx)) {
-      std::fprintf(stderr, "initial correctness check FAILED for key %lld\n",
-                   static_cast<long long>(initial_keys[i]));
+  // results/phase3_inserts.csv has the pre-v4 runs, without an order
+  // column; these go in their own file
+  const bool new_file = !std::ifstream("results/inserts.csv").good();
+  std::ofstream csv("results/inserts.csv", std::ios::app);
+  if (new_file) csv << "path,n,structure,order,ns_per_insert\n";
+  const char* orders[3] = {"sorted", "shuffled", "append"};
+  for (int order = 0; order < 3; order++) {
+    // ~10% held out, scattered across the whole range (the same split as
+    // benchmark_db_lookups), or for appends the largest 10%
+    std::vector<int64_t> initial, holdout;
+    if (order == 2) {
+      initial.assign(all_keys.begin(), all_keys.begin() + n * 9 / 10);
+      holdout.assign(all_keys.begin() + n * 9 / 10, all_keys.end());
+    } else {
+      std::mt19937_64 rng(7);
+      for (int64_t k : all_keys) (rng() % 10 == 0 ? holdout : initial).push_back(k);
+      if (order == 1) std::shuffle(holdout.begin(), holdout.end(), std::mt19937_64(99));
+    }
+
+    GappedArray ga = GappedArray::build(initial, density, eps);
+    BPlusTree tree;
+    for (size_t i = 0; i < initial.size(); i++) tree.insert(initial[i], static_cast<int64_t>(i));
+    TlxDefault tlx_default;
+    TlxWide tlx_wide;
+    tlx_default.bulk_load(initial.begin(), initial.end());
+    tlx_wide.bulk_load(initial.begin(), initial.end());
+
+    const double ga_ns = ns_per(holdout.size(), [&] {
+      for (int64_t k : holdout) ga.insert(k);
+    });
+    const double tree_ns = ns_per(holdout.size(), [&] {
+      for (int64_t k : holdout) tree.insert(k, 1);
+    });
+    const double tlx_default_ns = ns_per(holdout.size(), [&] {
+      for (int64_t k : holdout) tlx_default.insert(k);
+    });
+    const double tlx_wide_ns = ns_per(holdout.size(), [&] {
+      for (int64_t k : holdout) tlx_wide.insert(k);
+    });
+
+    // every key, original and inserted, has to be findable in all four
+    size_t missing = 0;
+    for (int64_t k : all_keys) {
+      size_t idx;
+      int64_t v;
+      if (!ga.search(k, idx) || !tree.search(k, v) || tlx_default.find(k) == tlx_default.end() ||
+          tlx_wide.find(k) == tlx_wide.end()) {
+        missing++;
+      }
+    }
+    if (missing > 0 || !ga.consistent() || ga.size() != n) {
+      std::fprintf(stderr, "correctness check FAILED after %s inserts: %zu keys missing\n", orders[order], missing);
       return 1;
     }
+
+    std::printf("%-9s %14.1f %12.1f %12.1f %12.1f   %zu local, %zu full; %.1f%% full afterwards\n", orders[order],
+                ga_ns, tree_ns, tlx_default_ns, tlx_wide_ns, ga.local_rebalance_count(), ga.rebalance_count(),
+                100.0 * ga.size() / ga.capacity());
+    csv << path << "," << n << ",gapped_array," << orders[order] << "," << ga_ns << "\n";
+    csv << path << "," << n << ",bplus_tree," << orders[order] << "," << tree_ns << "\n";
+    csv << path << "," << n << ",tlx_256," << orders[order] << "," << tlx_default_ns << "\n";
+    csv << path << "," << n << ",tlx_512," << orders[order] << "," << tlx_wide_ns << "\n";
   }
-  std::printf("initial correctness check passed\n");
 
-  // time inserting every holdout key into the gapped array
-  auto t0 = std::chrono::steady_clock::now();
-  for (int64_t key : holdout_keys) ga.insert(key);
-  auto t1 = std::chrono::steady_clock::now();
-  double gapped_insert_ns =
-      std::chrono::duration<double, std::nano>(t1 - t0).count() / holdout_keys.size();
-
-  std::printf("inserted all %zu holdout keys, %zu local rebalances + %zu full rebalances triggered\n",
-              holdout_keys.size(), ga.local_rebalance_count(), ga.rebalance_count());
-  std::printf("gapped array final: %zu keys in %zu slots (%.1f%% full)\n", ga.size(),
-              ga.capacity(), 100.0 * ga.size() / ga.capacity());
-
-  // now verify EVERY original key -- both initial and inserted -- is
-  // findable in the final structure
-  size_t missing = 0;
-  for (int64_t key : all_keys) {
-    size_t idx;
-    if (!ga.search(key, idx)) missing++;
-  }
-  if (missing > 0) {
-    std::fprintf(stderr, "FINAL correctness check FAILED: %zu of %zu keys missing\n", missing, n);
-    return 1;
-  }
-  std::printf("final correctness check passed: all %zu keys findable after inserts\n", n);
-
-  // naive baseline: inserting into a plain sorted vector shifts
-  // everything after the insertion point, so this is O(n) per
-  // insert -- only time a small sample, not all of them
-  const size_t naive_sample = std::min<size_t>(500, holdout_keys.size());
-  std::vector<int64_t> dense_copy = initial_keys;
-  auto t2 = std::chrono::steady_clock::now();
-  for (size_t i = 0; i < naive_sample; i++) {
-    auto it = std::lower_bound(dense_copy.begin(), dense_copy.end(), holdout_keys[i]);
-    dense_copy.insert(it, holdout_keys[i]);
-  }
-  auto t3 = std::chrono::steady_clock::now();
-  double naive_insert_ns = std::chrono::duration<double, std::nano>(t3 - t2).count() / naive_sample;
-
-  std::printf("\ngapped array insert: %10.1f ns/insert (avg over all %zu inserts)\n",
-              gapped_insert_ns, holdout_keys.size());
-  std::printf("naive vector insert: %10.1f ns/insert (avg over a %zu-insert sample, O(n) each)\n\n",
-              naive_insert_ns, naive_sample);
-
-  std::ofstream csv("results/phase3_inserts.csv", std::ios::app);
-  csv << path << "," << n << ",gapped_array," << gapped_insert_ns << "\n";
-  csv << path << "," << n << ",naive_vector," << naive_insert_ns << "\n";
-
+  // the old baseline: a plain sorted vector, which shifts everything
+  // after the insertion point, so only a small sample is timed
+  std::mt19937_64 rng(7);
+  std::vector<int64_t> dense, sample;
+  for (int64_t k : all_keys) (rng() % 10 == 0 ? sample : dense).push_back(k);
+  sample.resize(std::min<size_t>(500, sample.size()));
+  const double vector_ns = ns_per(sample.size(), [&] {
+    for (int64_t k : sample) dense.insert(std::lower_bound(dense.begin(), dense.end(), k), k);
+  });
+  std::printf("\nplain sorted vector, for context: %.1f ns/insert (a %zu-insert sample, O(n) each)\n", vector_ns,
+              sample.size());
+  csv << path << "," << n << ",naive_vector,sorted," << vector_ns << "\n";
   return 0;
 }

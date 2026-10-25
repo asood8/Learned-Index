@@ -16,7 +16,13 @@
 //
 // usage: sql_harness <wal-path> [checkpoint-every]
 // The store's files are deleted at startup. checkpoint-every sets how
-// many writes trigger an automatic checkpoint (0 turns them off).
+// many writes trigger an automatic checkpoint (0 turns them off). The
+// environment variable HARNESS_EPS sets the learned index's error bound
+// (64 by default, like the REPL). A small one, like 4, makes the gapped
+// array refresh and rebalance far more often, so the differential test
+// exercises that code with tables of only a few hundred rows.
+#include <algorithm>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <iostream>
@@ -49,8 +55,8 @@ struct Database {
   DurableStore store;
   Catalog catalog;
   Executor exec;
-  Database(const std::string& wal_path, size_t checkpoint_every)
-      : store(wal_path, 0.7, 64, checkpoint_every), catalog(store), exec(store, catalog) {}
+  Database(const std::string& wal_path, size_t checkpoint_every, int64_t eps)
+      : store(wal_path, 0.7, eps, checkpoint_every), catalog(store), exec(store, catalog) {}
 };
 
 int main(int argc, char** argv) {
@@ -60,14 +66,16 @@ int main(int argc, char** argv) {
   }
   const std::string wal_path = argv[1];
   const size_t checkpoint_every = (argc > 2) ? std::strtoull(argv[2], nullptr, 10) : 100000;
+  const char* eps_env = std::getenv("HARNESS_EPS");
+  const int64_t eps = (eps_env != nullptr) ? std::max<int64_t>(1, std::atoll(eps_env)) : 64;
   DurableStore::destroy(wal_path);
-  auto db = std::make_unique<Database>(wal_path, checkpoint_every);
+  auto db = std::make_unique<Database>(wal_path, checkpoint_every, eps);
 
   std::string line;
   while (std::getline(std::cin, line)) {
     if (line == ".restart") {
       db.reset();  // close the log before reopening it
-      db = std::make_unique<Database>(wal_path, checkpoint_every);
+      db = std::make_unique<Database>(wal_path, checkpoint_every, eps);
       std::printf("OK\n");
       std::fflush(stdout);
       continue;

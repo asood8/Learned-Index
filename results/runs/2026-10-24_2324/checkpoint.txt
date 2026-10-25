@@ -1,0 +1,3 @@
+2000 rows x 10 rounds = 20000 writes, each fsync'd, in 30.7 s
+before checkpoint: log   1508908 bytes; opening replays 20000 log records:       7.60 ms (median of 5); rows correct: yes
+after checkpoint:  log         8 bytes, snapshot 140910 bytes; opening loads 2000 rows, replays 0:     0.48 ms (median of 5); rows correct: yes

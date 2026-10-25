@@ -1,0 +1,10 @@
+== data/uniform_1000000.bin (1000000 keys) ==
+learned model: position ~= 0.10006234 * key + -387.8512  (max_error = 688)
+segmented model: 84 segments (eps = 64) vs 1 segment for Phase 1
+correctness check passed (2000 keys), tree holds 1000000 entries
+binary search:       204.9 ns/lookup
+B+-tree:             331.6 ns/lookup
+learned index:       127.3 ns/lookup
+segmented index:      93.7 ns/lookup
+(median of 7 interleaved passes)
+

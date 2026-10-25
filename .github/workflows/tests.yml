@@ -24,3 +24,6 @@ jobs:
 
       - name: Differential test against SQLite
         run: make difftest RUNS=30
+
+      - name: Differential test with a tiny error bound, so rebalancing runs constantly
+        run: make difftest RUNS=30 EPS=4

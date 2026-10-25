@@ -3,6 +3,7 @@
 // cpp/third_party/pgm/) -- a fairer bar than only ever comparing
 // against our own B-tree, since it answers "how does this compare to
 // what people actually ship," not just "did I beat my own baseline."
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <fstream>
@@ -23,6 +24,12 @@ double time_lookups(const std::vector<int64_t>& queries, SearchFn search_fn) {
   return std::chrono::duration<double, std::nano>(t1 - t0).count() / queries.size();
 }
 
+double median(std::vector<double> v) {
+  std::sort(v.begin(), v.end());
+  const size_t n = v.size();
+  return (n % 2 == 1) ? v[n / 2] : (v[n / 2 - 1] + v[n / 2]) / 2.0;
+}
+
 void run_comparison(const std::vector<int64_t>& keys, const std::string& name) {
   const size_t n = keys.size();
   const int num_queries = 100000;
@@ -32,52 +39,57 @@ void run_comparison(const std::vector<int64_t>& keys, const std::string& name) {
   for (int i = 0; i < num_queries; i++) queries[i] = keys[pick(rng)];
 
   const int64_t eps = 64;
+  const int passes = 7;
 
-  // ours
   SegmentedModel ours = build_segmented_model(keys, eps);
-  bool ours_correct = true;
-  double ours_ns = time_lookups(queries, [&](int64_t q) -> int64_t {
-    int64_t val;
-    if (!segmented_search(keys, ours, q, val)) ours_correct = false;
-    return val;
-  });
-  size_t ours_bytes = ours.segments.size() * sizeof(Segment);
-  size_t ours_segments = ours.segments.size();
-
-  // ours again, with optimal segmentation instead of pinned anchors
-  SegmentedModel optimal = build_optimal_segmented_model(keys, eps);
-  bool optimal_correct = true;
-  double optimal_ns = time_lookups(queries, [&](int64_t q) -> int64_t {
-    int64_t val;
-    if (!segmented_search(keys, optimal, q, val)) optimal_correct = false;
-    return val;
-  });
-  size_t optimal_bytes = optimal.segments.size() * sizeof(Segment);
-  size_t optimal_segments = optimal.segments.size();
-
-  // real PGM-index, same epsilon
+  SegmentedModel optimal = build_optimal_segmented_model(keys, eps);  // ours, without pinned anchors
   pgm::PGMIndex<int64_t, 64> pgm_index(keys);
-  bool pgm_correct = true;
-  double pgm_ns = time_lookups(queries, [&](int64_t q) -> int64_t {
+  // EpsilonRecursive = 0 turns off PGM's recursive routing layer, to
+  // check whether that layer explains the difference rather than guess
+  pgm::PGMIndex<int64_t, 64, 0> pgm_norecursive(keys);
+
+  // each returns the key's position, or -1 if it wasn't found
+  auto ours_fn = [&](int64_t q) -> int64_t {
+    int64_t val;
+    return segmented_search(keys, ours, q, val) ? val : -1;
+  };
+  auto optimal_fn = [&](int64_t q) -> int64_t {
+    int64_t val;
+    return segmented_search(keys, optimal, q, val) ? val : -1;
+  };
+  auto pgm_fn = [&](int64_t q) -> int64_t {
     auto range = pgm_index.search(q);
     auto it = std::lower_bound(keys.begin() + range.lo, keys.begin() + range.hi, q);
-    if (it == keys.begin() + range.hi || *it != q) pgm_correct = false;
-    return it - keys.begin();
-  });
-  size_t pgm_bytes = pgm_index.size_in_bytes();
-  size_t pgm_segments = pgm_index.segments_count();
-
-  // also test with EpsilonRecursive=0 -- disables PGM's recursive
-  // routing layer entirely, to directly confirm whether that layer's
-  // overhead explains a surprising result rather than just guessing
-  pgm::PGMIndex<int64_t, 64, 0> pgm_norecursive(keys);
-  bool pgm_nr_correct = true;
-  double pgm_nr_ns = time_lookups(queries, [&](int64_t q) -> int64_t {
+    return (it == keys.begin() + range.hi || *it != q) ? -1 : it - keys.begin();
+  };
+  auto pgm_nr_fn = [&](int64_t q) -> int64_t {
     auto range = pgm_norecursive.search(q);
     auto it = std::lower_bound(keys.begin() + range.lo, keys.begin() + range.hi, q);
-    if (it == keys.begin() + range.hi || *it != q) pgm_nr_correct = false;
-    return it - keys.begin();
-  });
+    return (it == keys.begin() + range.hi || *it != q) ? -1 : it - keys.begin();
+  };
+  auto finds_all = [&](auto fn) {
+    for (int64_t q : queries) {
+      if (fn(q) < 0) return false;
+    }
+    return true;
+  };
+  const bool ours_correct = finds_all(ours_fn), optimal_correct = finds_all(optimal_fn),
+             pgm_correct = finds_all(pgm_fn), pgm_nr_correct = finds_all(pgm_nr_fn);
+
+  // Each pass times all four in turn; the numbers are medians over
+  // passes. This used to time each one once, one after another, so the
+  // order they ran in could move the results.
+  std::vector<double> t[4];
+  for (int p = 0; p < passes; p++) {
+    t[0].push_back(time_lookups(queries, ours_fn));
+    t[1].push_back(time_lookups(queries, optimal_fn));
+    t[2].push_back(time_lookups(queries, pgm_fn));
+    t[3].push_back(time_lookups(queries, pgm_nr_fn));
+  }
+  const double ours_ns = median(t[0]), optimal_ns = median(t[1]), pgm_ns = median(t[2]), pgm_nr_ns = median(t[3]);
+  const size_t ours_bytes = ours.segments.size() * sizeof(Segment), ours_segments = ours.segments.size();
+  const size_t optimal_bytes = optimal.segments.size() * sizeof(Segment), optimal_segments = optimal.segments.size();
+  const size_t pgm_bytes = pgm_index.size_in_bytes(), pgm_segments = pgm_index.segments_count();
 
   std::printf("== %s (%zu keys, eps=%lld) ==\n", name.c_str(), n, static_cast<long long>(eps));
   std::printf("  correctness  -- ours (pinned): %s   ours (optimal): %s   PGM-index: %s   PGM (no recursion): %s\n",

@@ -6,7 +6,7 @@
 #   make test        build and run the three test suites
 #   make asan        the same suites under AddressSanitizer + UBSan
 #   make demos       the durability and catalog restart demos
-#   make difftest    compare against SQLite (RUNS=200 by default)
+#   make difftest    compare against SQLite (RUNS=200, EPS=64 by default)
 #   make data        generate the benchmark datasets (needs numpy)
 #   make all         build every program, benchmarks included
 #   make repl        build and start the SQL shell
@@ -15,10 +15,12 @@
 CXX      ?= g++
 CXXFLAGS ?= -O2 -std=c++17 -Wall -Wextra
 SANFLAGS := -O1 -g -std=c++17 -fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer
+INCLUDES := -Icpp/third_party/tlx
 RUNS     ?= 200
+EPS      ?= 64
 
 BUILD    := build
-HEADERS  := $(wildcard cpp/*.h) $(wildcard cpp/third_party/pgm/*.hpp)
+HEADERS  := $(wildcard cpp/*.h) $(wildcard cpp/third_party/pgm/*.hpp) $(wildcard cpp/third_party/tlx/tlx/*/*.hpp)
 PROGRAMS := $(patsubst cpp/%.cpp,$(BUILD)/%,$(wildcard cpp/*.cpp))
 TESTS    := test_suite sql_parser_test executor_test
 
@@ -27,10 +29,10 @@ TESTS    := test_suite sql_parser_test executor_test
 all: $(PROGRAMS)
 
 $(BUILD)/%: cpp/%.cpp $(HEADERS) | $(BUILD) results
-	$(CXX) $(CXXFLAGS) -o $@ $<
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -o $@ $<
 
 $(BUILD)/asan/%: cpp/%.cpp $(HEADERS) | $(BUILD)/asan results
-	$(CXX) $(SANFLAGS) -o $@ $<
+	$(CXX) $(SANFLAGS) $(INCLUDES) -o $@ $<
 
 $(BUILD) $(BUILD)/asan results:
 	mkdir -p $@
@@ -53,7 +55,7 @@ demos: $(BUILD)/durability_demo $(BUILD)/phase8_demo
 	./$(BUILD)/phase8_demo
 
 difftest: $(BUILD)/sql_harness
-	python3 python/sqlite_diff_test.py --harness $(BUILD)/sql_harness --runs $(RUNS)
+	HARNESS_EPS=$(EPS) python3 python/sqlite_diff_test.py --harness $(BUILD)/sql_harness --runs $(RUNS)
 
 data:
 	python3 python/data_gen.py --n 1000000 --outdir data

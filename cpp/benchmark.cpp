@@ -28,13 +28,33 @@ std::vector<int64_t> load_keys(const std::string& path) {
   return keys;
 }
 
+volatile int64_t g_sink = 0;  // keeps the optimizer from deleting the loops
+
+// Nanoseconds per query for one pass of `lookup` over every query.
+template <typename Lookup>
+double time_pass(const std::vector<int64_t>& queries, Lookup lookup) {
+  int64_t sink = 0;
+  const auto t0 = std::chrono::steady_clock::now();
+  for (int64_t q : queries) sink += lookup(q);
+  const auto t1 = std::chrono::steady_clock::now();
+  g_sink = sink;
+  return std::chrono::duration<double, std::nano>(t1 - t0).count() / queries.size();
+}
+
+double median(std::vector<double> v) {
+  std::sort(v.begin(), v.end());
+  const size_t n = v.size();
+  return (n % 2 == 1) ? v[n / 2] : (v[n / 2 - 1] + v[n / 2]) / 2.0;
+}
+
 int main(int argc, char** argv) {
   if (argc < 2) {
-    std::fprintf(stderr, "usage: %s <keys.bin> [num_queries]\n", argv[0]);
+    std::fprintf(stderr, "usage: %s <keys.bin> [num_queries] [passes]\n", argv[0]);
     return 1;
   }
   std::string path = argv[1];
   int num_queries = argc > 2 ? std::atoi(argv[2]) : 100000;
+  const int passes = argc > 3 ? std::max(1, std::atoi(argv[3])) : 7;
 
   std::vector<int64_t> keys = load_keys(path);
   size_t n = keys.size();
@@ -88,48 +108,42 @@ int main(int argc, char** argv) {
   std::vector<int64_t> queries(num_queries);
   for (int i = 0; i < num_queries; i++) queries[i] = keys[dist(rng)];
 
-  volatile int64_t sink = 0;  // keeps the optimizer from deleting the loops
-
-  auto t0 = std::chrono::steady_clock::now();
-  for (int64_t q : queries) {
-    auto it = std::lower_bound(keys.begin(), keys.end(), q);
-    sink += (it - keys.begin());
-  }
-  auto t1 = std::chrono::steady_clock::now();
-  double bs_ns = std::chrono::duration<double, std::nano>(t1 - t0).count() / num_queries;
-
-  auto t2 = std::chrono::steady_clock::now();
-  for (int64_t q : queries) {
-    int64_t val;
+  // Each pass times every structure once, in turn, and the reported
+  // number is the median over passes. This used to time each structure
+  // once, one after another, which lets the order skew the results: a
+  // single run measured the skewed B+-tree at 869.6 ns, against 317.0 ns
+  // in another program minutes later.
+  auto bs = [&](int64_t q) -> int64_t { return std::lower_bound(keys.begin(), keys.end(), q) - keys.begin(); };
+  auto bt = [&](int64_t q) -> int64_t {
+    int64_t val = 0;
     tree.search(q, val);
-    sink += val;
-  }
-  auto t3 = std::chrono::steady_clock::now();
-  double bt_ns = std::chrono::duration<double, std::nano>(t3 - t2).count() / num_queries;
-
-  auto t4 = std::chrono::steady_clock::now();
-  for (int64_t q : queries) {
-    int64_t val;
+    return val;
+  };
+  auto li = [&](int64_t q) -> int64_t {
+    int64_t val = 0;
     learned_search(keys, model, q, val);
-    sink += val;
-  }
-  auto t5 = std::chrono::steady_clock::now();
-  double li_ns = std::chrono::duration<double, std::nano>(t5 - t4).count() / num_queries;
-
-  auto t6 = std::chrono::steady_clock::now();
-  for (int64_t q : queries) {
-    int64_t val;
+    return val;
+  };
+  auto seg = [&](int64_t q) -> int64_t {
+    int64_t val = 0;
     segmented_search(keys, seg_model, q, val);
-    sink += val;
+    return val;
+  };
+  std::vector<double> times[4];
+  for (int p = 0; p < passes; p++) {
+    times[0].push_back(time_pass(queries, bs));
+    times[1].push_back(time_pass(queries, bt));
+    times[2].push_back(time_pass(queries, li));
+    times[3].push_back(time_pass(queries, seg));
   }
-  auto t7 = std::chrono::steady_clock::now();
-  double seg_ns = std::chrono::duration<double, std::nano>(t7 - t6).count() / num_queries;
+  const double bs_ns = median(times[0]), bt_ns = median(times[1]), li_ns = median(times[2]),
+               seg_ns = median(times[3]);
 
   std::printf("binary search:    %8.1f ns/lookup\n", bs_ns);
   std::printf("B+-tree:          %8.1f ns/lookup\n", bt_ns);
   std::printf("learned index:    %8.1f ns/lookup\n", li_ns);
   std::printf("segmented index:  %8.1f ns/lookup\n", seg_ns);
-  std::printf("(sink=%lld, ignore)\n\n", static_cast<long long>(sink));
+  std::printf("(median of %d interleaved passes)\n\n", passes);
 
   std::ofstream csv("results/phase0_baseline.csv", std::ios::app);
   csv << path << "," << n << "," << num_queries << ",binary_search," << bs_ns << "\n";

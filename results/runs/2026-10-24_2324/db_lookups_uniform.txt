@@ -1,0 +1,26 @@
+== data/uniform_1000000.bin: 899735 keys built, 100265 held out ==
+200000 random hits and 200000 misses, median of 7 interleaved passes, ns/lookup
+
+freshly built                            hits     misses
+binary search                           176.0      197.7
+B+-tree (bplus_tree.h)                  349.4      304.2
+tlx B+-tree (256-byte nodes)            243.5      248.8
+tlx B+-tree (512-byte nodes)            199.2      205.0
+Phase 2 model, dense array               94.7       98.9
+gapped array (what the db uses)         124.5      129.0
+
+memory, bytes per key               whole thing   routing only
+binary search                              8.00         0.0000   just the keys
+B+-tree (bplus_tree.h)                    37.35         1.5986   also stores an 8-byte value per key
+tlx B+-tree (256-byte nodes)               9.28         0.5318   leaves full (bulk-loaded)
+tlx B+-tree (512-byte nodes)               8.63         0.2566   leaves full (bulk-loaded)
+Phase 2 model, dense array                 8.00         0.0020   read-only; no room for inserts
+gapped array (what the db uses)           11.44         0.0065   keys + empty slots + segments
+
+after inserting the 100265 held-out keys (1230 local + 0 full rebalances)
+binary search (rebuilt array)           183.2
+B+-tree (bplus_tree.h)                  316.0
+tlx B+-tree (256-byte nodes)            327.6
+tlx B+-tree (512-byte nodes)            258.5
+Phase 2 model (rebuilt)                 105.6
+gapped array (what the db uses)         137.3

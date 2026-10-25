@@ -8,9 +8,11 @@
 // the lever a real attacker with insert access has: it forces one
 // small region's segment(s) to exhaust their local gaps and trigger
 // far more rebalances than the same insert *count* would otherwise
-// need. This mirrors real published research (poisoning attacks on
-// ALEX and PGM-index have been shown to degrade performance by up to
-// ~20%) -- not a stretch of the concept, the same actual attack shape.
+// need. It's a simple, untargeted version of the idea. Poisoning the
+// data ALEX and PGM-index are built on cost them up to ~20% in one
+// study (Bachfischer et al. 2022), while attacks designed around ALEX's
+// own insert mechanism slowed it down by up to 1,641x and ran it out of
+// memory after a few hundred insertions (Yang et al., VLDB 2024).
 #include <algorithm>
 #include <chrono>
 #include <cstdio>

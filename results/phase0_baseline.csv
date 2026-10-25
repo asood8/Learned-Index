@@ -47,3 +47,11 @@ data/skewed_1000000.bin,1000000,200000,binary_search,184.774
 data/skewed_1000000.bin,1000000,200000,bplus_tree,319.124
 data/skewed_1000000.bin,1000000,200000,learned_index,196.8
 data/skewed_1000000.bin,1000000,200000,segmented_index,117.665
+data/uniform_1000000.bin,1000000,200000,binary_search,204.931
+data/uniform_1000000.bin,1000000,200000,bplus_tree,331.635
+data/uniform_1000000.bin,1000000,200000,learned_index,127.32
+data/uniform_1000000.bin,1000000,200000,segmented_index,93.6983
+data/skewed_1000000.bin,1000000,200000,binary_search,183.9
+data/skewed_1000000.bin,1000000,200000,bplus_tree,302.741
+data/skewed_1000000.bin,1000000,200000,learned_index,204.766
+data/skewed_1000000.bin,1000000,200000,segmented_index,103.085

@@ -1,0 +1,8 @@
+classic bloom filter: 958506 bits (119814 bytes), 7 hash functions, built for 1.0% FPR
+learned bloom filter: 14976 weights + 42810 backup entries = 462288 bytes total
+
+zero false negatives -- classic: yes, learned: yes
+
+empirical false-positive rate over 200000 confirmed true-negative queries:
+  classic bloom filter: 1.021%
+  learned bloom filter: 50.380%

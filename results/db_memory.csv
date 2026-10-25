@@ -1,0 +1,24 @@
+data/uniform_1000000.bin,binary search,8,0
+data/uniform_1000000.bin,B+-tree (bplus_tree.h),37.3488,1.59861
+data/uniform_1000000.bin,tlx B+-tree (256-byte nodes),9.28185,0.531765
+data/uniform_1000000.bin,tlx B+-tree (512-byte nodes),8.63199,0.256609
+data/uniform_1000000.bin,Phase 2 model, dense array,8.00203,0.00202726
+data/uniform_1000000.bin,gapped array (what the db uses),11.435,0.00645523
+data/skewed_1000000.bin,binary search,8,0
+data/skewed_1000000.bin,B+-tree (bplus_tree.h),37.3488,1.59861
+data/skewed_1000000.bin,tlx B+-tree (256-byte nodes),9.28185,0.531765
+data/skewed_1000000.bin,tlx B+-tree (512-byte nodes),8.63199,0.256609
+data/skewed_1000000.bin,Phase 2 model, dense array,8.00395,0.00394783
+data/skewed_1000000.bin,gapped array (what the db uses),11.4359,0.00736217
+data/uniform_10000000.bin,binary search,8,0
+data/uniform_10000000.bin,B+-tree (bplus_tree.h),37.3514,1.60131
+data/uniform_10000000.bin,tlx B+-tree (256-byte nodes),9.28136,0.531342
+data/uniform_10000000.bin,tlx B+-tree (512-byte nodes),8.62911,0.254095
+data/uniform_10000000.bin,Phase 2 model, dense array,8.00203,0.00202924
+data/uniform_10000000.bin,gapped array (what the db uses),11.435,0.00642103
+data/skewed_10000000.bin,binary search,8,0
+data/skewed_10000000.bin,B+-tree (bplus_tree.h),37.3514,1.60131
+data/skewed_10000000.bin,tlx B+-tree (256-byte nodes),9.28136,0.531342
+data/skewed_10000000.bin,tlx B+-tree (512-byte nodes),8.62911,0.254095
+data/skewed_10000000.bin,Phase 2 model, dense array,8.00245,0.00245055
+data/skewed_10000000.bin,gapped array (what the db uses),11.4352,0.00661035

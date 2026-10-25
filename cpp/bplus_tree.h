@@ -50,7 +50,12 @@ class BPlusTree {
   // the memory allocator's own internal bookkeeping per allocation --
   // a reasonable, clearly-labeled approximation, not a claim of exact
   // byte-for-byte process memory usage.
-  size_t memory_bytes() const { return node_memory_bytes(root_); }
+  size_t memory_bytes() const { return node_memory_bytes(root_, true); }
+
+  // Just the internal nodes: the routing part of the tree, without the
+  // leaves that hold the keys and values. memory_bytes() counts both, so
+  // it isn't comparable to the size of a learned model on its own.
+  size_t inner_memory_bytes() const { return node_memory_bytes(root_, false); }
 
  private:
   struct Node {
@@ -62,14 +67,15 @@ class BPlusTree {
     explicit Node(bool leaf) : is_leaf(leaf) {}
   };
 
-  size_t node_memory_bytes(const Node* node) const {
+  size_t node_memory_bytes(const Node* node, bool include_leaves) const {
+    if (node->is_leaf && !include_leaves) return 0;
     size_t bytes = sizeof(Node);
     bytes += node->keys.capacity() * sizeof(int64_t);
     if (node->is_leaf) {
       bytes += node->values.capacity() * sizeof(int64_t);
     } else {
       bytes += node->children.capacity() * sizeof(Node*);
-      for (const Node* child : node->children) bytes += node_memory_bytes(child);
+      for (const Node* child : node->children) bytes += node_memory_bytes(child, include_leaves);
     }
     return bytes;
   }
