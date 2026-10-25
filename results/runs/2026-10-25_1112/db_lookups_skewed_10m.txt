@@ -1,0 +1,26 @@
+== data/skewed_10000000.bin: 9000430 keys built, 999570 held out ==
+200000 random hits and 200000 misses, median of 7 interleaved passes, ns/lookup
+
+freshly built                            hits     misses
+binary search                           560.7      530.5
+B+-tree (bplus_tree.h)                  921.5      857.8
+tlx B+-tree (256-byte nodes)            548.0      523.7
+tlx B+-tree (512-byte nodes)            434.4      450.9
+Phase 2 model, dense array              245.8      198.9
+gapped array (what the db uses)         397.6      315.1
+
+memory, bytes per key               whole thing   routing only
+binary search                              8.00         0.0000   just the keys
+B+-tree (bplus_tree.h)                    37.35         1.6013   also stores an 8-byte value per key
+tlx B+-tree (256-byte nodes)               9.28         0.5313   leaves full (bulk-loaded)
+tlx B+-tree (512-byte nodes)               8.63         0.2541   leaves full (bulk-loaded)
+Phase 2 model, dense array                 8.00         0.0025   read-only; no room for inserts
+gapped array (what the db uses)           11.44         0.0066   keys + empty slots + segments
+
+after inserting the 999570 held-out keys (12342 local + 0 full rebalances)
+binary search (rebuilt array)           516.7
+B+-tree (bplus_tree.h)                  765.7
+tlx B+-tree (256-byte nodes)            901.1
+tlx B+-tree (512-byte nodes)            670.8
+Phase 2 model (rebuilt)                 215.1
+gapped array (what the db uses)         328.1

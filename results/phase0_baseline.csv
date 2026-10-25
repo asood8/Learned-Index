@@ -55,3 +55,11 @@ data/skewed_1000000.bin,1000000,200000,binary_search,183.9
 data/skewed_1000000.bin,1000000,200000,bplus_tree,302.741
 data/skewed_1000000.bin,1000000,200000,learned_index,204.766
 data/skewed_1000000.bin,1000000,200000,segmented_index,103.085
+data/uniform_1000000.bin,1000000,200000,binary_search,185.48
+data/uniform_1000000.bin,1000000,200000,bplus_tree,310.659
+data/uniform_1000000.bin,1000000,200000,learned_index,124.236
+data/uniform_1000000.bin,1000000,200000,segmented_index,93.3461
+data/skewed_1000000.bin,1000000,200000,binary_search,185.625
+data/skewed_1000000.bin,1000000,200000,bplus_tree,315.413
+data/skewed_1000000.bin,1000000,200000,learned_index,209.221
+data/skewed_1000000.bin,1000000,200000,segmented_index,104.996

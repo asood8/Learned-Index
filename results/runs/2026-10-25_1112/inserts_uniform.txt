@@ -1,0 +1,7 @@
+== data/uniform_1000000.bin (1000000 keys) ==
+order       gapped array      B+-tree    tlx 256 B    tlx 512 B   gapped array rebalances
+sorted             323.1        131.2        145.2        131.2   1230 local, 0 full; 77.8% full afterwards
+shuffled           398.3        431.5        469.4        325.9   1370 local, 0 full; 77.8% full afterwards
+append             577.2         72.2         50.7         38.5   1578 local, 0 full; 70.7% full afterwards
+
+plain sorted vector, for context: 249386.6 ns/insert (a 500-insert sample, O(n) each)

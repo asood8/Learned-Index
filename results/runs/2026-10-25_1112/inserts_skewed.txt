@@ -1,0 +1,7 @@
+== data/skewed_1000000.bin (1000000 keys) ==
+order       gapped array      B+-tree    tlx 256 B    tlx 512 B   gapped array rebalances
+sorted             299.9        124.7        141.8        127.9   1217 local, 0 full; 77.8% full afterwards
+shuffled           482.4        459.0        401.0        384.7   1359 local, 0 full; 77.8% full afterwards
+append             465.7         70.8         53.8         37.9   1597 local, 0 full; 70.5% full afterwards
+
+plain sorted vector, for context: 244197.7 ns/insert (a 500-insert sample, O(n) each)

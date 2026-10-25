@@ -1,0 +1,9 @@
+universe: 10000 keys, skew=1.0, cache capacity: 500 (5.0% of universe)
+trained on 200000 labeled accesses from a separate training trace
+
+hit rate on a held-out evaluation trace (200000 accesses):
+  LRU:              58.67%
+  learned (Hawkeye): 63.36%
+  Belady's optimal:  74.63%  (ceiling -- needs the future, unreachable online)
+
+learned cache closed 29.4% of the gap between LRU and the theoretical ceiling

@@ -1,0 +1,546 @@
+data/uniform_1000000.bin,learned index,load, random order (ns/row),3131.77
+data/uniform_1000000.bin,learned index,memory after the load (bytes/row),84.8822
+data/uniform_1000000.bin,learned index,open from the log (ms),692.908
+data/uniform_1000000.bin,learned index,open from a snapshot (ms),177.093
+data/uniform_1000000.bin,learned index,memory after opening the snapshot (bytes/row),89.1531
+data/uniform_1000000.bin,learned index,point lookup, parsed ahead of time (ns),586.927
+data/uniform_1000000.bin,learned index,point lookup for a missing id (ns),247.7
+data/uniform_1000000.bin,learned index,point lookup, parsed each time (ns),1481.26
+data/uniform_1000000.bin,learned index,  of which the store's own lookup (ns),288.935
+data/uniform_1000000.bin,learned index,range scan of 10 rows (ns),1528.11
+data/uniform_1000000.bin,learned index,range scan of 100 rows (ns),10995.6
+data/uniform_1000000.bin,learned index,range scan of 1000 rows (ns),94407.5
+data/uniform_1000000.bin,learned index,insert, random order (ns),2874.61
+data/uniform_1000000.bin,learned index,insert, appended past the end (ns),3535.14
+data/uniform_1000000.bin,learned index,95% reads, 5% inserts following the data (ns/op),732.469
+data/uniform_1000000.bin,learned index,50% reads, 50% inserts following the data (ns/op),1367.06
+data/uniform_1000000.bin,learned index,50% reads, 50% inserts spread evenly (ns/op),1825.24
+data/uniform_1000000.bin,learned index,durable insert, fsync every 1 (ns),1.67169e+06
+data/uniform_1000000.bin,learned index,durable insert, fsync every 8 (ns),204364
+data/uniform_1000000.bin,learned index,durable insert, fsync every 64 (ns),42436.8
+data/uniform_1000000.bin,learned index,durable insert, fsync every 512 (ns),7623.9
+data/uniform_1000000.bin,B+-tree (tlx),load, random order (ns/row),2649.27
+data/uniform_1000000.bin,B+-tree (tlx),memory after the load (bytes/row),115.234
+data/uniform_1000000.bin,B+-tree (tlx),open from the log (ms),753.169
+data/uniform_1000000.bin,B+-tree (tlx),open from a snapshot (ms),217.262
+data/uniform_1000000.bin,B+-tree (tlx),memory after opening the snapshot (bytes/row),94.2511
+data/uniform_1000000.bin,B+-tree (tlx),point lookup, parsed ahead of time (ns),672.431
+data/uniform_1000000.bin,B+-tree (tlx),point lookup for a missing id (ns),519.503
+data/uniform_1000000.bin,B+-tree (tlx),point lookup, parsed each time (ns),1483.37
+data/uniform_1000000.bin,B+-tree (tlx),  of which the store's own lookup (ns),441.929
+data/uniform_1000000.bin,B+-tree (tlx),range scan of 10 rows (ns),1415.15
+data/uniform_1000000.bin,B+-tree (tlx),range scan of 100 rows (ns),10822.3
+data/uniform_1000000.bin,B+-tree (tlx),range scan of 1000 rows (ns),95594.4
+data/uniform_1000000.bin,B+-tree (tlx),insert, random order (ns),2863.74
+data/uniform_1000000.bin,B+-tree (tlx),insert, appended past the end (ns),1772.07
+data/uniform_1000000.bin,B+-tree (tlx),95% reads, 5% inserts following the data (ns/op),983.845
+data/uniform_1000000.bin,B+-tree (tlx),50% reads, 50% inserts following the data (ns/op),1435.41
+data/uniform_1000000.bin,B+-tree (tlx),50% reads, 50% inserts spread evenly (ns/op),1331.65
+data/uniform_1000000.bin,B+-tree (tlx),durable insert, fsync every 1 (ns),2.59005e+06
+data/uniform_1000000.bin,B+-tree (tlx),durable insert, fsync every 8 (ns),178049
+data/uniform_1000000.bin,B+-tree (tlx),durable insert, fsync every 64 (ns),25547.9
+data/uniform_1000000.bin,B+-tree (tlx),durable insert, fsync every 512 (ns),7939.49
+data/uniform_1000000.bin,learned index,load, random order (ns/row),3246.34
+data/uniform_1000000.bin,learned index,memory after the load (bytes/row),84.8822
+data/uniform_1000000.bin,learned index,open from the log (ms),617.854
+data/uniform_1000000.bin,learned index,open from a snapshot (ms),137.078
+data/uniform_1000000.bin,learned index,memory after opening the snapshot (bytes/row),89.1531
+data/uniform_1000000.bin,learned index,point lookup, parsed ahead of time (ns),615.89
+data/uniform_1000000.bin,learned index,point lookup for a missing id (ns),231.853
+data/uniform_1000000.bin,learned index,point lookup, parsed each time (ns),1386.43
+data/uniform_1000000.bin,learned index,  of which the store's own lookup (ns),264.553
+data/uniform_1000000.bin,learned index,range scan of 10 rows (ns),1321.75
+data/uniform_1000000.bin,learned index,range scan of 100 rows (ns),11076.4
+data/uniform_1000000.bin,learned index,range scan of 1000 rows (ns),92587.9
+data/uniform_1000000.bin,learned index,insert, random order (ns),2830.03
+data/uniform_1000000.bin,learned index,insert, appended past the end (ns),3317.32
+data/uniform_1000000.bin,learned index,95% reads, 5% inserts following the data (ns/op),681.787
+data/uniform_1000000.bin,learned index,50% reads, 50% inserts following the data (ns/op),1321.74
+data/uniform_1000000.bin,learned index,50% reads, 50% inserts spread evenly (ns/op),1680.33
+data/uniform_1000000.bin,learned index,durable insert, fsync every 1 (ns),1.74151e+06
+data/uniform_1000000.bin,learned index,durable insert, fsync every 8 (ns),204972
+data/uniform_1000000.bin,learned index,durable insert, fsync every 64 (ns),38164.6
+data/uniform_1000000.bin,learned index,durable insert, fsync every 512 (ns),9676.41
+data/uniform_1000000.bin,B+-tree (tlx),load, random order (ns/row),2711.58
+data/uniform_1000000.bin,B+-tree (tlx),memory after the load (bytes/row),115.234
+data/uniform_1000000.bin,B+-tree (tlx),open from the log (ms),813.18
+data/uniform_1000000.bin,B+-tree (tlx),open from a snapshot (ms),225.808
+data/uniform_1000000.bin,B+-tree (tlx),memory after opening the snapshot (bytes/row),94.2511
+data/uniform_1000000.bin,B+-tree (tlx),point lookup, parsed ahead of time (ns),691.922
+data/uniform_1000000.bin,B+-tree (tlx),point lookup for a missing id (ns),546.651
+data/uniform_1000000.bin,B+-tree (tlx),point lookup, parsed each time (ns),1484.49
+data/uniform_1000000.bin,B+-tree (tlx),  of which the store's own lookup (ns),454.835
+data/uniform_1000000.bin,B+-tree (tlx),range scan of 10 rows (ns),1375.76
+data/uniform_1000000.bin,B+-tree (tlx),range scan of 100 rows (ns),11039.1
+data/uniform_1000000.bin,B+-tree (tlx),range scan of 1000 rows (ns),94723.9
+data/uniform_1000000.bin,B+-tree (tlx),insert, random order (ns),2625.28
+data/uniform_1000000.bin,B+-tree (tlx),insert, appended past the end (ns),1727.18
+data/uniform_1000000.bin,B+-tree (tlx),95% reads, 5% inserts following the data (ns/op),971.169
+data/uniform_1000000.bin,B+-tree (tlx),50% reads, 50% inserts following the data (ns/op),1397.89
+data/uniform_1000000.bin,B+-tree (tlx),50% reads, 50% inserts spread evenly (ns/op),1415.66
+data/uniform_1000000.bin,B+-tree (tlx),durable insert, fsync every 1 (ns),1.66543e+06
+data/uniform_1000000.bin,B+-tree (tlx),durable insert, fsync every 8 (ns),175993
+data/uniform_1000000.bin,B+-tree (tlx),durable insert, fsync every 64 (ns),40138.8
+data/uniform_1000000.bin,B+-tree (tlx),durable insert, fsync every 512 (ns),7484.74
+data/uniform_1000000.bin,learned index,load, random order (ns/row),2854.2
+data/uniform_1000000.bin,learned index,memory after the load (bytes/row),84.8822
+data/uniform_1000000.bin,learned index,open from the log (ms),440.082
+data/uniform_1000000.bin,learned index,open from a snapshot (ms),140.34
+data/uniform_1000000.bin,learned index,memory after opening the snapshot (bytes/row),89.1531
+data/uniform_1000000.bin,learned index,point lookup, parsed ahead of time (ns),652.098
+data/uniform_1000000.bin,learned index,point lookup for a missing id (ns),230.293
+data/uniform_1000000.bin,learned index,point lookup, parsed each time (ns),1404.94
+data/uniform_1000000.bin,learned index,  of which the store's own lookup (ns),294.788
+data/uniform_1000000.bin,learned index,range scan of 10 rows (ns),1367.92
+data/uniform_1000000.bin,learned index,range scan of 100 rows (ns),10663.1
+data/uniform_1000000.bin,learned index,range scan of 1000 rows (ns),90627.7
+data/uniform_1000000.bin,learned index,insert, random order (ns),2750.05
+data/uniform_1000000.bin,learned index,insert, appended past the end (ns),3419.22
+data/uniform_1000000.bin,learned index,95% reads, 5% inserts following the data (ns/op),653.523
+data/uniform_1000000.bin,learned index,50% reads, 50% inserts following the data (ns/op),1278.46
+data/uniform_1000000.bin,learned index,50% reads, 50% inserts spread evenly (ns/op),1781.18
+data/uniform_1000000.bin,learned index,durable insert, fsync every 1 (ns),1.17505e+06
+data/uniform_1000000.bin,learned index,durable insert, fsync every 8 (ns),134231
+data/uniform_1000000.bin,learned index,durable insert, fsync every 64 (ns),21647.4
+data/uniform_1000000.bin,learned index,durable insert, fsync every 512 (ns),4866.16
+data/uniform_1000000.bin,B+-tree (tlx),load, random order (ns/row),2605.42
+data/uniform_1000000.bin,B+-tree (tlx),memory after the load (bytes/row),115.234
+data/uniform_1000000.bin,B+-tree (tlx),open from the log (ms),790.258
+data/uniform_1000000.bin,B+-tree (tlx),open from a snapshot (ms),213.435
+data/uniform_1000000.bin,B+-tree (tlx),memory after opening the snapshot (bytes/row),94.2511
+data/uniform_1000000.bin,B+-tree (tlx),point lookup, parsed ahead of time (ns),724.434
+data/uniform_1000000.bin,B+-tree (tlx),point lookup for a missing id (ns),534.204
+data/uniform_1000000.bin,B+-tree (tlx),point lookup, parsed each time (ns),1615.73
+data/uniform_1000000.bin,B+-tree (tlx),  of which the store's own lookup (ns),451.791
+data/uniform_1000000.bin,B+-tree (tlx),range scan of 10 rows (ns),1369.45
+data/uniform_1000000.bin,B+-tree (tlx),range scan of 100 rows (ns),10419.2
+data/uniform_1000000.bin,B+-tree (tlx),range scan of 1000 rows (ns),95339.5
+data/uniform_1000000.bin,B+-tree (tlx),insert, random order (ns),2607.58
+data/uniform_1000000.bin,B+-tree (tlx),insert, appended past the end (ns),1775.31
+data/uniform_1000000.bin,B+-tree (tlx),95% reads, 5% inserts following the data (ns/op),853.368
+data/uniform_1000000.bin,B+-tree (tlx),50% reads, 50% inserts following the data (ns/op),1324.89
+data/uniform_1000000.bin,B+-tree (tlx),50% reads, 50% inserts spread evenly (ns/op),1422.86
+data/uniform_1000000.bin,B+-tree (tlx),durable insert, fsync every 1 (ns),1.18283e+06
+data/uniform_1000000.bin,B+-tree (tlx),durable insert, fsync every 8 (ns),145344
+data/uniform_1000000.bin,B+-tree (tlx),durable insert, fsync every 64 (ns),30453.6
+data/uniform_1000000.bin,B+-tree (tlx),durable insert, fsync every 512 (ns),7687.54
+data/skewed_1000000.bin,learned index,load, random order (ns/row),2907.39
+data/skewed_1000000.bin,learned index,memory after the load (bytes/row),80.9531
+data/skewed_1000000.bin,learned index,open from the log (ms),417.181
+data/skewed_1000000.bin,learned index,open from a snapshot (ms),129.799
+data/skewed_1000000.bin,learned index,memory after opening the snapshot (bytes/row),89.1606
+data/skewed_1000000.bin,learned index,point lookup, parsed ahead of time (ns),670.754
+data/skewed_1000000.bin,learned index,point lookup for a missing id (ns),260.198
+data/skewed_1000000.bin,learned index,point lookup, parsed each time (ns),1489.68
+data/skewed_1000000.bin,learned index,  of which the store's own lookup (ns),296.316
+data/skewed_1000000.bin,learned index,range scan of 10 rows (ns),1271.33
+data/skewed_1000000.bin,learned index,range scan of 100 rows (ns),10839.6
+data/skewed_1000000.bin,learned index,range scan of 1000 rows (ns),96269.3
+data/skewed_1000000.bin,learned index,insert, random order (ns),2951.43
+data/skewed_1000000.bin,learned index,insert, appended past the end (ns),3346.62
+data/skewed_1000000.bin,learned index,95% reads, 5% inserts following the data (ns/op),706.187
+data/skewed_1000000.bin,learned index,50% reads, 50% inserts following the data (ns/op),1477.76
+data/skewed_1000000.bin,learned index,50% reads, 50% inserts spread evenly (ns/op),2121.06
+data/skewed_1000000.bin,learned index,durable insert, fsync every 1 (ns),1.79886e+06
+data/skewed_1000000.bin,learned index,durable insert, fsync every 8 (ns),218903
+data/skewed_1000000.bin,learned index,durable insert, fsync every 64 (ns),30798.7
+data/skewed_1000000.bin,learned index,durable insert, fsync every 512 (ns),7675.44
+data/skewed_1000000.bin,B+-tree (tlx),load, random order (ns/row),2553.88
+data/skewed_1000000.bin,B+-tree (tlx),memory after the load (bytes/row),115.237
+data/skewed_1000000.bin,B+-tree (tlx),open from the log (ms),705.248
+data/skewed_1000000.bin,B+-tree (tlx),open from a snapshot (ms),211.787
+data/skewed_1000000.bin,B+-tree (tlx),memory after opening the snapshot (bytes/row),94.2522
+data/skewed_1000000.bin,B+-tree (tlx),point lookup, parsed ahead of time (ns),621.886
+data/skewed_1000000.bin,B+-tree (tlx),point lookup for a missing id (ns),508.267
+data/skewed_1000000.bin,B+-tree (tlx),point lookup, parsed each time (ns),1520.66
+data/skewed_1000000.bin,B+-tree (tlx),  of which the store's own lookup (ns),532.023
+data/skewed_1000000.bin,B+-tree (tlx),range scan of 10 rows (ns),1331.1
+data/skewed_1000000.bin,B+-tree (tlx),range scan of 100 rows (ns),11212.4
+data/skewed_1000000.bin,B+-tree (tlx),range scan of 1000 rows (ns),95901.8
+data/skewed_1000000.bin,B+-tree (tlx),insert, random order (ns),2597.07
+data/skewed_1000000.bin,B+-tree (tlx),insert, appended past the end (ns),1717.45
+data/skewed_1000000.bin,B+-tree (tlx),95% reads, 5% inserts following the data (ns/op),795.937
+data/skewed_1000000.bin,B+-tree (tlx),50% reads, 50% inserts following the data (ns/op),1293.12
+data/skewed_1000000.bin,B+-tree (tlx),50% reads, 50% inserts spread evenly (ns/op),1127.02
+data/skewed_1000000.bin,B+-tree (tlx),durable insert, fsync every 1 (ns),1.39063e+06
+data/skewed_1000000.bin,B+-tree (tlx),durable insert, fsync every 8 (ns),166876
+data/skewed_1000000.bin,B+-tree (tlx),durable insert, fsync every 64 (ns),34706.8
+data/skewed_1000000.bin,B+-tree (tlx),durable insert, fsync every 512 (ns),7717.66
+data/skewed_1000000.bin,learned index,load, random order (ns/row),2911.39
+data/skewed_1000000.bin,learned index,memory after the load (bytes/row),80.9531
+data/skewed_1000000.bin,learned index,open from the log (ms),449.875
+data/skewed_1000000.bin,learned index,open from a snapshot (ms),139.345
+data/skewed_1000000.bin,learned index,memory after opening the snapshot (bytes/row),89.1606
+data/skewed_1000000.bin,learned index,point lookup, parsed ahead of time (ns),588.484
+data/skewed_1000000.bin,learned index,point lookup for a missing id (ns),230.471
+data/skewed_1000000.bin,learned index,point lookup, parsed each time (ns),1453.39
+data/skewed_1000000.bin,learned index,  of which the store's own lookup (ns),319.186
+data/skewed_1000000.bin,learned index,range scan of 10 rows (ns),1386.47
+data/skewed_1000000.bin,learned index,range scan of 100 rows (ns),11290.2
+data/skewed_1000000.bin,learned index,range scan of 1000 rows (ns),92300.5
+data/skewed_1000000.bin,learned index,insert, random order (ns),2767.4
+data/skewed_1000000.bin,learned index,insert, appended past the end (ns),3392.26
+data/skewed_1000000.bin,learned index,95% reads, 5% inserts following the data (ns/op),749.064
+data/skewed_1000000.bin,learned index,50% reads, 50% inserts following the data (ns/op),1459.86
+data/skewed_1000000.bin,learned index,50% reads, 50% inserts spread evenly (ns/op),2391.91
+data/skewed_1000000.bin,learned index,durable insert, fsync every 1 (ns),1.24376e+06
+data/skewed_1000000.bin,learned index,durable insert, fsync every 8 (ns),148292
+data/skewed_1000000.bin,learned index,durable insert, fsync every 64 (ns),20469.9
+data/skewed_1000000.bin,learned index,durable insert, fsync every 512 (ns),6122.91
+data/skewed_1000000.bin,B+-tree (tlx),load, random order (ns/row),3192.39
+data/skewed_1000000.bin,B+-tree (tlx),memory after the load (bytes/row),115.237
+data/skewed_1000000.bin,B+-tree (tlx),open from the log (ms),858.936
+data/skewed_1000000.bin,B+-tree (tlx),open from a snapshot (ms),221.089
+data/skewed_1000000.bin,B+-tree (tlx),memory after opening the snapshot (bytes/row),94.2522
+data/skewed_1000000.bin,B+-tree (tlx),point lookup, parsed ahead of time (ns),692.476
+data/skewed_1000000.bin,B+-tree (tlx),point lookup for a missing id (ns),519.014
+data/skewed_1000000.bin,B+-tree (tlx),point lookup, parsed each time (ns),1529.74
+data/skewed_1000000.bin,B+-tree (tlx),  of which the store's own lookup (ns),415.867
+data/skewed_1000000.bin,B+-tree (tlx),range scan of 10 rows (ns),1445.99
+data/skewed_1000000.bin,B+-tree (tlx),range scan of 100 rows (ns),10767.9
+data/skewed_1000000.bin,B+-tree (tlx),range scan of 1000 rows (ns),92152.1
+data/skewed_1000000.bin,B+-tree (tlx),insert, random order (ns),2685.88
+data/skewed_1000000.bin,B+-tree (tlx),insert, appended past the end (ns),1767.52
+data/skewed_1000000.bin,B+-tree (tlx),95% reads, 5% inserts following the data (ns/op),1007.03
+data/skewed_1000000.bin,B+-tree (tlx),50% reads, 50% inserts following the data (ns/op),1294.46
+data/skewed_1000000.bin,B+-tree (tlx),50% reads, 50% inserts spread evenly (ns/op),1057.5
+data/skewed_1000000.bin,B+-tree (tlx),durable insert, fsync every 1 (ns),1.69718e+06
+data/skewed_1000000.bin,B+-tree (tlx),durable insert, fsync every 8 (ns),188512
+data/skewed_1000000.bin,B+-tree (tlx),durable insert, fsync every 64 (ns),31270.6
+data/skewed_1000000.bin,B+-tree (tlx),durable insert, fsync every 512 (ns),6482.21
+data/skewed_1000000.bin,learned index,load, random order (ns/row),2991.88
+data/skewed_1000000.bin,learned index,memory after the load (bytes/row),80.9531
+data/skewed_1000000.bin,learned index,open from the log (ms),465.126
+data/skewed_1000000.bin,learned index,open from a snapshot (ms),166.68
+data/skewed_1000000.bin,learned index,memory after opening the snapshot (bytes/row),89.1606
+data/skewed_1000000.bin,learned index,point lookup, parsed ahead of time (ns),588.785
+data/skewed_1000000.bin,learned index,point lookup for a missing id (ns),238.474
+data/skewed_1000000.bin,learned index,point lookup, parsed each time (ns),1450.72
+data/skewed_1000000.bin,learned index,  of which the store's own lookup (ns),400.332
+data/skewed_1000000.bin,learned index,range scan of 10 rows (ns),1346.46
+data/skewed_1000000.bin,learned index,range scan of 100 rows (ns),10822
+data/skewed_1000000.bin,learned index,range scan of 1000 rows (ns),92407.5
+data/skewed_1000000.bin,learned index,insert, random order (ns),2721.47
+data/skewed_1000000.bin,learned index,insert, appended past the end (ns),3380.55
+data/skewed_1000000.bin,learned index,95% reads, 5% inserts following the data (ns/op),694.888
+data/skewed_1000000.bin,learned index,50% reads, 50% inserts following the data (ns/op),1294.65
+data/skewed_1000000.bin,learned index,50% reads, 50% inserts spread evenly (ns/op),2626.37
+data/skewed_1000000.bin,learned index,durable insert, fsync every 1 (ns),1.34655e+06
+data/skewed_1000000.bin,learned index,durable insert, fsync every 8 (ns),167368
+data/skewed_1000000.bin,learned index,durable insert, fsync every 64 (ns),27572
+data/skewed_1000000.bin,learned index,durable insert, fsync every 512 (ns),7928.42
+data/skewed_1000000.bin,B+-tree (tlx),load, random order (ns/row),2563.99
+data/skewed_1000000.bin,B+-tree (tlx),memory after the load (bytes/row),115.237
+data/skewed_1000000.bin,B+-tree (tlx),open from the log (ms),678.443
+data/skewed_1000000.bin,B+-tree (tlx),open from a snapshot (ms),241.297
+data/skewed_1000000.bin,B+-tree (tlx),memory after opening the snapshot (bytes/row),94.2522
+data/skewed_1000000.bin,B+-tree (tlx),point lookup, parsed ahead of time (ns),791.293
+data/skewed_1000000.bin,B+-tree (tlx),point lookup for a missing id (ns),513.942
+data/skewed_1000000.bin,B+-tree (tlx),point lookup, parsed each time (ns),1516.12
+data/skewed_1000000.bin,B+-tree (tlx),  of which the store's own lookup (ns),510.749
+data/skewed_1000000.bin,B+-tree (tlx),range scan of 10 rows (ns),1588.85
+data/skewed_1000000.bin,B+-tree (tlx),range scan of 100 rows (ns),10962.1
+data/skewed_1000000.bin,B+-tree (tlx),range scan of 1000 rows (ns),94149.6
+data/skewed_1000000.bin,B+-tree (tlx),insert, random order (ns),2575.32
+data/skewed_1000000.bin,B+-tree (tlx),insert, appended past the end (ns),1729.77
+data/skewed_1000000.bin,B+-tree (tlx),95% reads, 5% inserts following the data (ns/op),801.449
+data/skewed_1000000.bin,B+-tree (tlx),50% reads, 50% inserts following the data (ns/op),1300.27
+data/skewed_1000000.bin,B+-tree (tlx),50% reads, 50% inserts spread evenly (ns/op),1111.16
+data/skewed_1000000.bin,B+-tree (tlx),durable insert, fsync every 1 (ns),1.36442e+06
+data/skewed_1000000.bin,B+-tree (tlx),durable insert, fsync every 8 (ns),170590
+data/skewed_1000000.bin,B+-tree (tlx),durable insert, fsync every 64 (ns),24768.1
+data/skewed_1000000.bin,B+-tree (tlx),durable insert, fsync every 512 (ns),7290.09
+data/uniform_10000000.bin,learned index,load, random order (ns/row),3383.45
+data/uniform_10000000.bin,learned index,memory after the load (bytes/row),85.2293
+data/uniform_10000000.bin,learned index,open from the log (ms),7551.56
+data/uniform_10000000.bin,learned index,open from a snapshot (ms),1848.4
+data/uniform_10000000.bin,learned index,memory after opening the snapshot (bytes/row),89.1563
+data/uniform_10000000.bin,learned index,point lookup, parsed ahead of time (ns),996.884
+data/uniform_10000000.bin,learned index,point lookup for a missing id (ns),456.894
+data/uniform_10000000.bin,learned index,point lookup, parsed each time (ns),1750.39
+data/uniform_10000000.bin,learned index,  of which the store's own lookup (ns),745.66
+data/uniform_10000000.bin,learned index,range scan of 10 rows (ns),1639.91
+data/uniform_10000000.bin,learned index,range scan of 100 rows (ns),11465.1
+data/uniform_10000000.bin,learned index,range scan of 1000 rows (ns),91551.5
+data/uniform_10000000.bin,learned index,insert, random order (ns),3047.79
+data/uniform_10000000.bin,learned index,insert, appended past the end (ns),5503.56
+data/uniform_10000000.bin,learned index,95% reads, 5% inserts following the data (ns/op),896.864
+data/uniform_10000000.bin,learned index,50% reads, 50% inserts following the data (ns/op),1611.22
+data/uniform_10000000.bin,learned index,50% reads, 50% inserts spread evenly (ns/op),1523.63
+data/uniform_10000000.bin,learned index,durable insert, fsync every 1 (ns),1.79359e+06
+data/uniform_10000000.bin,learned index,durable insert, fsync every 8 (ns),207573
+data/uniform_10000000.bin,learned index,durable insert, fsync every 64 (ns),27254.2
+data/uniform_10000000.bin,learned index,durable insert, fsync every 512 (ns),6729.63
+data/uniform_10000000.bin,B+-tree (tlx),load, random order (ns/row),3351.21
+data/uniform_10000000.bin,B+-tree (tlx),memory after the load (bytes/row),115.207
+data/uniform_10000000.bin,B+-tree (tlx),open from the log (ms),12121.2
+data/uniform_10000000.bin,B+-tree (tlx),open from a snapshot (ms),2441.39
+data/uniform_10000000.bin,B+-tree (tlx),memory after opening the snapshot (bytes/row),94.2501
+data/uniform_10000000.bin,B+-tree (tlx),point lookup, parsed ahead of time (ns),1191.68
+data/uniform_10000000.bin,B+-tree (tlx),point lookup for a missing id (ns),1055.1
+data/uniform_10000000.bin,B+-tree (tlx),point lookup, parsed each time (ns),2013.58
+data/uniform_10000000.bin,B+-tree (tlx),  of which the store's own lookup (ns),794.345
+data/uniform_10000000.bin,B+-tree (tlx),range scan of 10 rows (ns),1705.79
+data/uniform_10000000.bin,B+-tree (tlx),range scan of 100 rows (ns),10836.1
+data/uniform_10000000.bin,B+-tree (tlx),range scan of 1000 rows (ns),93088.2
+data/uniform_10000000.bin,B+-tree (tlx),insert, random order (ns),3254.58
+data/uniform_10000000.bin,B+-tree (tlx),insert, appended past the end (ns),1824.29
+data/uniform_10000000.bin,B+-tree (tlx),95% reads, 5% inserts following the data (ns/op),1498.49
+data/uniform_10000000.bin,B+-tree (tlx),50% reads, 50% inserts following the data (ns/op),1691.67
+data/uniform_10000000.bin,B+-tree (tlx),50% reads, 50% inserts spread evenly (ns/op),1837
+data/uniform_10000000.bin,B+-tree (tlx),durable insert, fsync every 1 (ns),1.19524e+06
+data/uniform_10000000.bin,B+-tree (tlx),durable insert, fsync every 8 (ns),146163
+data/uniform_10000000.bin,B+-tree (tlx),durable insert, fsync every 64 (ns),28332
+data/uniform_10000000.bin,B+-tree (tlx),durable insert, fsync every 512 (ns),6935.06
+data/uniform_10000000.bin,learned index,load, random order (ns/row),3253.6
+data/uniform_10000000.bin,learned index,memory after the load (bytes/row),85.2293
+data/uniform_10000000.bin,learned index,open from the log (ms),6822.94
+data/uniform_10000000.bin,learned index,open from a snapshot (ms),1695.41
+data/uniform_10000000.bin,learned index,memory after opening the snapshot (bytes/row),89.1563
+data/uniform_10000000.bin,learned index,point lookup, parsed ahead of time (ns),893.607
+data/uniform_10000000.bin,learned index,point lookup for a missing id (ns),429.579
+data/uniform_10000000.bin,learned index,point lookup, parsed each time (ns),1798.73
+data/uniform_10000000.bin,learned index,  of which the store's own lookup (ns),450.34
+data/uniform_10000000.bin,learned index,range scan of 10 rows (ns),1815.57
+data/uniform_10000000.bin,learned index,range scan of 100 rows (ns),11481.6
+data/uniform_10000000.bin,learned index,range scan of 1000 rows (ns),92266.6
+data/uniform_10000000.bin,learned index,insert, random order (ns),3217.5
+data/uniform_10000000.bin,learned index,insert, appended past the end (ns),5287.18
+data/uniform_10000000.bin,learned index,95% reads, 5% inserts following the data (ns/op),1238.31
+data/uniform_10000000.bin,learned index,50% reads, 50% inserts following the data (ns/op),1636.1
+data/uniform_10000000.bin,learned index,50% reads, 50% inserts spread evenly (ns/op),1713.92
+data/uniform_10000000.bin,learned index,durable insert, fsync every 1 (ns),1.47883e+06
+data/uniform_10000000.bin,learned index,durable insert, fsync every 8 (ns),213555
+data/uniform_10000000.bin,learned index,durable insert, fsync every 64 (ns),32200.2
+data/uniform_10000000.bin,learned index,durable insert, fsync every 512 (ns),7325.53
+data/uniform_10000000.bin,B+-tree (tlx),load, random order (ns/row),3165.01
+data/uniform_10000000.bin,B+-tree (tlx),memory after the load (bytes/row),115.207
+data/uniform_10000000.bin,B+-tree (tlx),open from the log (ms),12097.1
+data/uniform_10000000.bin,B+-tree (tlx),open from a snapshot (ms),2420.27
+data/uniform_10000000.bin,B+-tree (tlx),memory after opening the snapshot (bytes/row),94.2501
+data/uniform_10000000.bin,B+-tree (tlx),point lookup, parsed ahead of time (ns),1148.97
+data/uniform_10000000.bin,B+-tree (tlx),point lookup for a missing id (ns),1156.04
+data/uniform_10000000.bin,B+-tree (tlx),point lookup, parsed each time (ns),1914.02
+data/uniform_10000000.bin,B+-tree (tlx),  of which the store's own lookup (ns),688.972
+data/uniform_10000000.bin,B+-tree (tlx),range scan of 10 rows (ns),1814.39
+data/uniform_10000000.bin,B+-tree (tlx),range scan of 100 rows (ns),11382
+data/uniform_10000000.bin,B+-tree (tlx),range scan of 1000 rows (ns),95770.6
+data/uniform_10000000.bin,B+-tree (tlx),insert, random order (ns),3173.84
+data/uniform_10000000.bin,B+-tree (tlx),insert, appended past the end (ns),1843.73
+data/uniform_10000000.bin,B+-tree (tlx),95% reads, 5% inserts following the data (ns/op),1337.29
+data/uniform_10000000.bin,B+-tree (tlx),50% reads, 50% inserts following the data (ns/op),1940.05
+data/uniform_10000000.bin,B+-tree (tlx),50% reads, 50% inserts spread evenly (ns/op),1813.3
+data/uniform_10000000.bin,B+-tree (tlx),durable insert, fsync every 1 (ns),1.90416e+06
+data/uniform_10000000.bin,B+-tree (tlx),durable insert, fsync every 8 (ns),201169
+data/uniform_10000000.bin,B+-tree (tlx),durable insert, fsync every 64 (ns),33048.3
+data/uniform_10000000.bin,B+-tree (tlx),durable insert, fsync every 512 (ns),6507.77
+data/uniform_10000000.bin,learned index,load, random order (ns/row),3270.39
+data/uniform_10000000.bin,learned index,memory after the load (bytes/row),85.2293
+data/uniform_10000000.bin,learned index,open from the log (ms),6312.16
+data/uniform_10000000.bin,learned index,open from a snapshot (ms),1726.75
+data/uniform_10000000.bin,learned index,memory after opening the snapshot (bytes/row),89.1563
+data/uniform_10000000.bin,learned index,point lookup, parsed ahead of time (ns),1202.82
+data/uniform_10000000.bin,learned index,point lookup for a missing id (ns),478.397
+data/uniform_10000000.bin,learned index,point lookup, parsed each time (ns),1772.9
+data/uniform_10000000.bin,learned index,  of which the store's own lookup (ns),749.305
+data/uniform_10000000.bin,learned index,range scan of 10 rows (ns),1645.96
+data/uniform_10000000.bin,learned index,range scan of 100 rows (ns),11166.4
+data/uniform_10000000.bin,learned index,range scan of 1000 rows (ns),95268.2
+data/uniform_10000000.bin,learned index,insert, random order (ns),3210.82
+data/uniform_10000000.bin,learned index,insert, appended past the end (ns),5844.39
+data/uniform_10000000.bin,learned index,95% reads, 5% inserts following the data (ns/op),1036.8
+data/uniform_10000000.bin,learned index,50% reads, 50% inserts following the data (ns/op),1671.17
+data/uniform_10000000.bin,learned index,50% reads, 50% inserts spread evenly (ns/op),1667.89
+data/uniform_10000000.bin,learned index,durable insert, fsync every 1 (ns),1.20703e+06
+data/uniform_10000000.bin,learned index,durable insert, fsync every 8 (ns),311343
+data/uniform_10000000.bin,learned index,durable insert, fsync every 64 (ns),33579.9
+data/uniform_10000000.bin,learned index,durable insert, fsync every 512 (ns),7361.79
+data/uniform_10000000.bin,B+-tree (tlx),load, random order (ns/row),3172.96
+data/uniform_10000000.bin,B+-tree (tlx),memory after the load (bytes/row),115.207
+data/uniform_10000000.bin,B+-tree (tlx),open from the log (ms),11563.8
+data/uniform_10000000.bin,B+-tree (tlx),open from a snapshot (ms),2414.23
+data/uniform_10000000.bin,B+-tree (tlx),memory after opening the snapshot (bytes/row),94.2501
+data/uniform_10000000.bin,B+-tree (tlx),point lookup, parsed ahead of time (ns),1055.68
+data/uniform_10000000.bin,B+-tree (tlx),point lookup for a missing id (ns),894.91
+data/uniform_10000000.bin,B+-tree (tlx),point lookup, parsed each time (ns),1802.13
+data/uniform_10000000.bin,B+-tree (tlx),  of which the store's own lookup (ns),725.158
+data/uniform_10000000.bin,B+-tree (tlx),range scan of 10 rows (ns),1911
+data/uniform_10000000.bin,B+-tree (tlx),range scan of 100 rows (ns),11520
+data/uniform_10000000.bin,B+-tree (tlx),range scan of 1000 rows (ns),92937.2
+data/uniform_10000000.bin,B+-tree (tlx),insert, random order (ns),3178.19
+data/uniform_10000000.bin,B+-tree (tlx),insert, appended past the end (ns),1812.73
+data/uniform_10000000.bin,B+-tree (tlx),95% reads, 5% inserts following the data (ns/op),1415.21
+data/uniform_10000000.bin,B+-tree (tlx),50% reads, 50% inserts following the data (ns/op),1812.12
+data/uniform_10000000.bin,B+-tree (tlx),50% reads, 50% inserts spread evenly (ns/op),1788.94
+data/uniform_10000000.bin,B+-tree (tlx),durable insert, fsync every 1 (ns),1.86939e+06
+data/uniform_10000000.bin,B+-tree (tlx),durable insert, fsync every 8 (ns),204649
+data/uniform_10000000.bin,B+-tree (tlx),durable insert, fsync every 64 (ns),30768.1
+data/uniform_10000000.bin,B+-tree (tlx),durable insert, fsync every 512 (ns),5457.72
+data/sosd_books_10000000.bin,learned index,load, random order (ns/row),3261.08
+data/sosd_books_10000000.bin,learned index,memory after the load (bytes/row),86.3062
+data/sosd_books_10000000.bin,learned index,open from the log (ms),6305.71
+data/sosd_books_10000000.bin,learned index,open from a snapshot (ms),1678.19
+data/sosd_books_10000000.bin,learned index,memory after opening the snapshot (bytes/row),89.1562
+data/sosd_books_10000000.bin,learned index,point lookup, parsed ahead of time (ns),925.164
+data/sosd_books_10000000.bin,learned index,point lookup for a missing id (ns),403.152
+data/sosd_books_10000000.bin,learned index,point lookup, parsed each time (ns),1719.52
+data/sosd_books_10000000.bin,learned index,  of which the store's own lookup (ns),688.088
+data/sosd_books_10000000.bin,learned index,range scan of 10 rows (ns),1552.44
+data/sosd_books_10000000.bin,learned index,range scan of 100 rows (ns),11555.3
+data/sosd_books_10000000.bin,learned index,range scan of 1000 rows (ns),94285.7
+data/sosd_books_10000000.bin,learned index,insert, random order (ns),3089.26
+data/sosd_books_10000000.bin,learned index,insert, appended past the end (ns),5651.97
+data/sosd_books_10000000.bin,learned index,95% reads, 5% inserts following the data (ns/op),1191.72
+data/sosd_books_10000000.bin,learned index,50% reads, 50% inserts following the data (ns/op),1533.72
+data/sosd_books_10000000.bin,learned index,50% reads, 50% inserts spread evenly (ns/op),1794.44
+data/sosd_books_10000000.bin,learned index,durable insert, fsync every 1 (ns),1.71377e+06
+data/sosd_books_10000000.bin,learned index,durable insert, fsync every 8 (ns),182463
+data/sosd_books_10000000.bin,learned index,durable insert, fsync every 64 (ns),35183.2
+data/sosd_books_10000000.bin,learned index,durable insert, fsync every 512 (ns),7729.09
+data/sosd_books_10000000.bin,B+-tree (tlx),load, random order (ns/row),3216.29
+data/sosd_books_10000000.bin,B+-tree (tlx),memory after the load (bytes/row),115.207
+data/sosd_books_10000000.bin,B+-tree (tlx),open from the log (ms),11785.6
+data/sosd_books_10000000.bin,B+-tree (tlx),open from a snapshot (ms),2511.92
+data/sosd_books_10000000.bin,B+-tree (tlx),memory after opening the snapshot (bytes/row),94.25
+data/sosd_books_10000000.bin,B+-tree (tlx),point lookup, parsed ahead of time (ns),1050.32
+data/sosd_books_10000000.bin,B+-tree (tlx),point lookup for a missing id (ns),881.712
+data/sosd_books_10000000.bin,B+-tree (tlx),point lookup, parsed each time (ns),1863.5
+data/sosd_books_10000000.bin,B+-tree (tlx),  of which the store's own lookup (ns),737.034
+data/sosd_books_10000000.bin,B+-tree (tlx),range scan of 10 rows (ns),1891.04
+data/sosd_books_10000000.bin,B+-tree (tlx),range scan of 100 rows (ns),11251.9
+data/sosd_books_10000000.bin,B+-tree (tlx),range scan of 1000 rows (ns),93843.8
+data/sosd_books_10000000.bin,B+-tree (tlx),insert, random order (ns),3153.58
+data/sosd_books_10000000.bin,B+-tree (tlx),insert, appended past the end (ns),1787.76
+data/sosd_books_10000000.bin,B+-tree (tlx),95% reads, 5% inserts following the data (ns/op),1461.17
+data/sosd_books_10000000.bin,B+-tree (tlx),50% reads, 50% inserts following the data (ns/op),2097.55
+data/sosd_books_10000000.bin,B+-tree (tlx),50% reads, 50% inserts spread evenly (ns/op),1815.46
+data/sosd_books_10000000.bin,B+-tree (tlx),durable insert, fsync every 1 (ns),1.6624e+06
+data/sosd_books_10000000.bin,B+-tree (tlx),durable insert, fsync every 8 (ns),179962
+data/sosd_books_10000000.bin,B+-tree (tlx),durable insert, fsync every 64 (ns),31583.8
+data/sosd_books_10000000.bin,B+-tree (tlx),durable insert, fsync every 512 (ns),8003.41
+data/sosd_fb_10000000.bin,learned index,load, random order (ns/row),2967.31
+data/sosd_fb_10000000.bin,learned index,memory after the load (bytes/row),88.4415
+data/sosd_fb_10000000.bin,learned index,open from the log (ms),7053.15
+data/sosd_fb_10000000.bin,learned index,open from a snapshot (ms),1557.72
+data/sosd_fb_10000000.bin,learned index,memory after opening the snapshot (bytes/row),89.2538
+data/sosd_fb_10000000.bin,learned index,point lookup, parsed ahead of time (ns),1261.41
+data/sosd_fb_10000000.bin,learned index,point lookup for a missing id (ns),464.549
+data/sosd_fb_10000000.bin,learned index,point lookup, parsed each time (ns),1844.48
+data/sosd_fb_10000000.bin,learned index,  of which the store's own lookup (ns),814.212
+data/sosd_fb_10000000.bin,learned index,range scan of 10 rows (ns),1895.5
+data/sosd_fb_10000000.bin,learned index,range scan of 100 rows (ns),11490.3
+data/sosd_fb_10000000.bin,learned index,range scan of 1000 rows (ns),94660.1
+data/sosd_fb_10000000.bin,learned index,insert, random order (ns),2579.71
+data/sosd_fb_10000000.bin,learned index,insert, appended past the end (ns),5388.52
+data/sosd_fb_10000000.bin,learned index,95% reads, 5% inserts following the data (ns/op),1245.02
+data/sosd_fb_10000000.bin,learned index,50% reads, 50% inserts following the data (ns/op),1795.52
+data/sosd_fb_10000000.bin,learned index,50% reads, 50% inserts spread evenly (ns/op),4671.42
+data/sosd_fb_10000000.bin,learned index,durable insert, fsync every 1 (ns),1.34023e+06
+data/sosd_fb_10000000.bin,learned index,durable insert, fsync every 8 (ns),215273
+data/sosd_fb_10000000.bin,learned index,durable insert, fsync every 64 (ns),33297.3
+data/sosd_fb_10000000.bin,learned index,durable insert, fsync every 512 (ns),6450.06
+data/sosd_fb_10000000.bin,B+-tree (tlx),load, random order (ns/row),3138.24
+data/sosd_fb_10000000.bin,B+-tree (tlx),memory after the load (bytes/row),115.207
+data/sosd_fb_10000000.bin,B+-tree (tlx),open from the log (ms),11819.7
+data/sosd_fb_10000000.bin,B+-tree (tlx),open from a snapshot (ms),2458.14
+data/sosd_fb_10000000.bin,B+-tree (tlx),memory after opening the snapshot (bytes/row),94.25
+data/sosd_fb_10000000.bin,B+-tree (tlx),point lookup, parsed ahead of time (ns),1082.02
+data/sosd_fb_10000000.bin,B+-tree (tlx),point lookup for a missing id (ns),846.456
+data/sosd_fb_10000000.bin,B+-tree (tlx),point lookup, parsed each time (ns),1985.16
+data/sosd_fb_10000000.bin,B+-tree (tlx),  of which the store's own lookup (ns),640.63
+data/sosd_fb_10000000.bin,B+-tree (tlx),range scan of 10 rows (ns),1897.55
+data/sosd_fb_10000000.bin,B+-tree (tlx),range scan of 100 rows (ns),11383
+data/sosd_fb_10000000.bin,B+-tree (tlx),range scan of 1000 rows (ns),95734.8
+data/sosd_fb_10000000.bin,B+-tree (tlx),insert, random order (ns),3157.72
+data/sosd_fb_10000000.bin,B+-tree (tlx),insert, appended past the end (ns),1743.15
+data/sosd_fb_10000000.bin,B+-tree (tlx),95% reads, 5% inserts following the data (ns/op),1654.24
+data/sosd_fb_10000000.bin,B+-tree (tlx),50% reads, 50% inserts following the data (ns/op),1908.1
+data/sosd_fb_10000000.bin,B+-tree (tlx),50% reads, 50% inserts spread evenly (ns/op),1371.49
+data/sosd_fb_10000000.bin,B+-tree (tlx),durable insert, fsync every 1 (ns),1.64504e+06
+data/sosd_fb_10000000.bin,B+-tree (tlx),durable insert, fsync every 8 (ns),199320
+data/sosd_fb_10000000.bin,B+-tree (tlx),durable insert, fsync every 64 (ns),25955.1
+data/sosd_fb_10000000.bin,B+-tree (tlx),durable insert, fsync every 512 (ns),5861.57
+data/sosd_osm_10000000.bin,learned index,load, random order (ns/row),2824.46
+data/sosd_osm_10000000.bin,learned index,memory after the load (bytes/row),84.1014
+data/sosd_osm_10000000.bin,learned index,open from the log (ms),7147.92
+data/sosd_osm_10000000.bin,learned index,open from a snapshot (ms),1718.5
+data/sosd_osm_10000000.bin,learned index,memory after opening the snapshot (bytes/row),89.2547
+data/sosd_osm_10000000.bin,learned index,point lookup, parsed ahead of time (ns),1068
+data/sosd_osm_10000000.bin,learned index,point lookup for a missing id (ns),488.603
+data/sosd_osm_10000000.bin,learned index,point lookup, parsed each time (ns),2019.09
+data/sosd_osm_10000000.bin,learned index,  of which the store's own lookup (ns),730.365
+data/sosd_osm_10000000.bin,learned index,range scan of 10 rows (ns),1858.76
+data/sosd_osm_10000000.bin,learned index,range scan of 100 rows (ns),11603.2
+data/sosd_osm_10000000.bin,learned index,range scan of 1000 rows (ns),92171.1
+data/sosd_osm_10000000.bin,learned index,insert, random order (ns),2563.56
+data/sosd_osm_10000000.bin,learned index,insert, appended past the end (ns),5543.65
+data/sosd_osm_10000000.bin,learned index,95% reads, 5% inserts following the data (ns/op),1313.75
+data/sosd_osm_10000000.bin,learned index,50% reads, 50% inserts following the data (ns/op),1491.1
+data/sosd_osm_10000000.bin,learned index,50% reads, 50% inserts spread evenly (ns/op),2321.48
+data/sosd_osm_10000000.bin,learned index,durable insert, fsync every 1 (ns),1.99984e+06
+data/sosd_osm_10000000.bin,learned index,durable insert, fsync every 8 (ns),207540
+data/sosd_osm_10000000.bin,learned index,durable insert, fsync every 64 (ns),32138.8
+data/sosd_osm_10000000.bin,learned index,durable insert, fsync every 512 (ns),5888.29
+data/sosd_osm_10000000.bin,B+-tree (tlx),load, random order (ns/row),3185.28
+data/sosd_osm_10000000.bin,B+-tree (tlx),memory after the load (bytes/row),115.207
+data/sosd_osm_10000000.bin,B+-tree (tlx),open from the log (ms),11471.3
+data/sosd_osm_10000000.bin,B+-tree (tlx),open from a snapshot (ms),2544.45
+data/sosd_osm_10000000.bin,B+-tree (tlx),memory after opening the snapshot (bytes/row),94.25
+data/sosd_osm_10000000.bin,B+-tree (tlx),point lookup, parsed ahead of time (ns),1060.76
+data/sosd_osm_10000000.bin,B+-tree (tlx),point lookup for a missing id (ns),916.035
+data/sosd_osm_10000000.bin,B+-tree (tlx),point lookup, parsed each time (ns),2001.2
+data/sosd_osm_10000000.bin,B+-tree (tlx),  of which the store's own lookup (ns),788.284
+data/sosd_osm_10000000.bin,B+-tree (tlx),range scan of 10 rows (ns),1676.75
+data/sosd_osm_10000000.bin,B+-tree (tlx),range scan of 100 rows (ns),11267
+data/sosd_osm_10000000.bin,B+-tree (tlx),range scan of 1000 rows (ns),93666
+data/sosd_osm_10000000.bin,B+-tree (tlx),insert, random order (ns),3198.71
+data/sosd_osm_10000000.bin,B+-tree (tlx),insert, appended past the end (ns),1775.53
+data/sosd_osm_10000000.bin,B+-tree (tlx),95% reads, 5% inserts following the data (ns/op),1583.82
+data/sosd_osm_10000000.bin,B+-tree (tlx),50% reads, 50% inserts following the data (ns/op),1937.29
+data/sosd_osm_10000000.bin,B+-tree (tlx),50% reads, 50% inserts spread evenly (ns/op),1638.87
+data/sosd_osm_10000000.bin,B+-tree (tlx),durable insert, fsync every 1 (ns),1.20618e+06
+data/sosd_osm_10000000.bin,B+-tree (tlx),durable insert, fsync every 8 (ns),173415
+data/sosd_osm_10000000.bin,B+-tree (tlx),durable insert, fsync every 64 (ns),33531.1
+data/sosd_osm_10000000.bin,B+-tree (tlx),durable insert, fsync every 512 (ns),7309.39
+data/sosd_wiki_10000000.bin,learned index,load, random order (ns/row),3086.01
+data/sosd_wiki_10000000.bin,learned index,memory after the load (bytes/row),83.491
+data/sosd_wiki_10000000.bin,learned index,open from the log (ms),7240.8
+data/sosd_wiki_10000000.bin,learned index,open from a snapshot (ms),1638.59
+data/sosd_wiki_10000000.bin,learned index,memory after opening the snapshot (bytes/row),89.1698
+data/sosd_wiki_10000000.bin,learned index,point lookup, parsed ahead of time (ns),922.026
+data/sosd_wiki_10000000.bin,learned index,point lookup for a missing id (ns),445.707
+data/sosd_wiki_10000000.bin,learned index,point lookup, parsed each time (ns),1778.26
+data/sosd_wiki_10000000.bin,learned index,  of which the store's own lookup (ns),441.19
+data/sosd_wiki_10000000.bin,learned index,range scan of 10 rows (ns),1635.23
+data/sosd_wiki_10000000.bin,learned index,range scan of 100 rows (ns),11002.1
+data/sosd_wiki_10000000.bin,learned index,range scan of 1000 rows (ns),98099.6
+data/sosd_wiki_10000000.bin,learned index,insert, random order (ns),3170.31
+data/sosd_wiki_10000000.bin,learned index,insert, appended past the end (ns),5585.89
+data/sosd_wiki_10000000.bin,learned index,95% reads, 5% inserts following the data (ns/op),1108.56
+data/sosd_wiki_10000000.bin,learned index,50% reads, 50% inserts following the data (ns/op),1657.89
+data/sosd_wiki_10000000.bin,learned index,50% reads, 50% inserts spread evenly (ns/op),3239.39
+data/sosd_wiki_10000000.bin,learned index,durable insert, fsync every 1 (ns),1.99425e+06
+data/sosd_wiki_10000000.bin,learned index,durable insert, fsync every 8 (ns),203278
+data/sosd_wiki_10000000.bin,learned index,durable insert, fsync every 64 (ns),35877.5
+data/sosd_wiki_10000000.bin,learned index,durable insert, fsync every 512 (ns),7802.6
+data/sosd_wiki_10000000.bin,B+-tree (tlx),load, random order (ns/row),3130.55
+data/sosd_wiki_10000000.bin,B+-tree (tlx),memory after the load (bytes/row),115.2
+data/sosd_wiki_10000000.bin,B+-tree (tlx),open from the log (ms),10948.7
+data/sosd_wiki_10000000.bin,B+-tree (tlx),open from a snapshot (ms),2505.98
+data/sosd_wiki_10000000.bin,B+-tree (tlx),memory after opening the snapshot (bytes/row),94.2501
+data/sosd_wiki_10000000.bin,B+-tree (tlx),point lookup, parsed ahead of time (ns),1047.53
+data/sosd_wiki_10000000.bin,B+-tree (tlx),point lookup for a missing id (ns),884.673
+data/sosd_wiki_10000000.bin,B+-tree (tlx),point lookup, parsed each time (ns),1836.14
+data/sosd_wiki_10000000.bin,B+-tree (tlx),  of which the store's own lookup (ns),925.432
+data/sosd_wiki_10000000.bin,B+-tree (tlx),range scan of 10 rows (ns),1733.35
+data/sosd_wiki_10000000.bin,B+-tree (tlx),range scan of 100 rows (ns),11356.2
+data/sosd_wiki_10000000.bin,B+-tree (tlx),range scan of 1000 rows (ns),94241.3
+data/sosd_wiki_10000000.bin,B+-tree (tlx),insert, random order (ns),3222.61
+data/sosd_wiki_10000000.bin,B+-tree (tlx),insert, appended past the end (ns),1755.63
+data/sosd_wiki_10000000.bin,B+-tree (tlx),95% reads, 5% inserts following the data (ns/op),1794.09
+data/sosd_wiki_10000000.bin,B+-tree (tlx),50% reads, 50% inserts following the data (ns/op),2331.37
+data/sosd_wiki_10000000.bin,B+-tree (tlx),50% reads, 50% inserts spread evenly (ns/op),1499.98
+data/sosd_wiki_10000000.bin,B+-tree (tlx),durable insert, fsync every 1 (ns),1.63224e+06
+data/sosd_wiki_10000000.bin,B+-tree (tlx),durable insert, fsync every 8 (ns),183269
+data/sosd_wiki_10000000.bin,B+-tree (tlx),durable insert, fsync every 64 (ns),33153.8
+data/sosd_wiki_10000000.bin,B+-tree (tlx),durable insert, fsync every 512 (ns),5598.6

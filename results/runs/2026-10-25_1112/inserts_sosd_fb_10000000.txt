@@ -1,0 +1,7 @@
+== data/sosd_fb_10000000.bin (10000000 keys) ==
+order       gapped array      B+-tree    tlx 256 B    tlx 512 B   gapped array rebalances
+sorted             192.9        134.5        151.2        132.9   2852 local, 0 full; 77.8% full afterwards
+shuffled           489.6        846.7        652.3        540.1   2871 local, 0 full; 77.8% full afterwards
+append             445.5         76.2         57.5         47.2   17365 local, 0 full; 71.3% full afterwards
+
+plain sorted vector, for context: 10972007.3 ns/insert (a 500-insert sample, O(n) each)

@@ -275,6 +275,10 @@ class BasicGappedArray {
   size_t segment_count() const { return model_.segments.size(); }
   size_t rebalance_count() const { return rebalance_count_; }
   size_t local_rebalance_count() const { return local_rebalance_count_; }
+  // How much work the refreshes did, for benchmarks: slots re-laid in
+  // total, and refreshes that had to widen beyond one segment.
+  size_t relaid_slot_count() const { return relaid_slots_; }
+  size_t widened_refresh_count() const { return widened_refreshes_; }
 
   // Checks the bookkeeping, for tests: real keys strictly increasing and
   // as many as size() says, segment start keys strictly increasing, and
@@ -321,6 +325,8 @@ class BasicGappedArray {
   size_t count_ = 0;
   size_t rebalance_count_ = 0;
   size_t local_rebalance_count_ = 0;
+  size_t relaid_slots_ = 0;
+  size_t widened_refreshes_ = 0;
   size_t segment_threshold_ = 1;   // changes to a segment before its region is refreshed
   int64_t max_gap_scan_ = 1;       // bounds how far a single insert's shift can reach
 
@@ -666,6 +672,8 @@ class BasicGappedArray {
     }
     relay(lo, hi, begin, end, keys);
     local_rebalance_count_++;
+    relaid_slots_ += end - begin;
+    if (hi > lo) widened_refreshes_++;
   }
 
   // The slots holding segments lo..hi: from the first key at or above
