@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Reruns every benchmark the README quotes, one after another, and saves
-# the raw output in results/runs/<date>/ next to a note of the machine,
-# compiler and commit it came from.
+# the raw output and the CSVs in results/runs/<date>/ next to a note of
+# the machine, compiler and commit it came from.
 #
 # Timings on a laptop move 10-20% between runs, so compare numbers from
 # the same run, and close other programs first.
@@ -21,6 +21,8 @@ repo=$(pwd)
 out=results/runs/$(date +%Y-%m-%d_%H%M)
 fsync_dir=${1:-$HOME/learned_index_fsync}
 mkdir -p "$out" "$fsync_dir/results"
+# the benchmarks write their CSVs next to this run's text output
+export LIDB_RESULTS_DIR="$repo/$out"
 
 {
   echo "date:      $(date -Is)"

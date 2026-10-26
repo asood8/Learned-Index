@@ -24,6 +24,7 @@
 #include <vector>
 
 #include "bplus_tree.h"
+#include "csv_out.h"
 #include "key_generators.h"
 #include "linear_model.h"
 #include "segmented_model.h"
@@ -137,13 +138,14 @@ int main() {
     std::printf("\n");
   }
 
-  std::ofstream csv("results/phase7_sweep.csv");
+  const std::string csv_path = results_path("phase7_sweep.csv");
+  std::ofstream csv(csv_path);
   csv << "dataset,n,structure,ns_per_lookup,index_bytes,index_bytes_per_key,total_bytes_per_key\n";
   for (const auto& r : results) {
     csv << r.dataset << "," << r.n << "," << r.structure << "," << r.ns_per_lookup << "," << r.index_bytes << ","
         << (static_cast<double>(r.index_bytes) / r.n) << "," << (static_cast<double>(r.total_bytes) / r.n) << "\n";
   }
-  std::printf("medians of 7 interleaved passes; wrote results/phase7_sweep.csv\n");
+  std::printf("medians of 7 interleaved passes; wrote %s\n", csv_path.c_str());
 
   return 0;
 }

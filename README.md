@@ -104,7 +104,7 @@ make repl        # build and start the SQL shell
 make data        # generate the synthetic benchmark datasets (needs numpy)
 make all         # build everything, including benchmarks
 
-python3 python/sosd_data.py   # download four real datasets from SOSD (Python 3.14+)
+python3 python/sosd_data.py   # download four real datasets from SOSD (needs numpy; zstd too before Python 3.14)
 scripts/run_benchmarks.sh     # rerun every benchmark in this README
 ```
 
@@ -949,8 +949,8 @@ and it covered up inserts that were getting slower as the array grew.
 
 The benchmarks aren't part of CI, because timings on shared machines are
 too noisy to mean much. `scripts/run_benchmarks.sh` reruns all of them
-and saves the output with a note of the machine, compiler and commit it
-came from, in `results/runs/`. Everything here was measured on one
+and saves the output and CSVs with a note of the machine, compiler and
+commit they came from, in `results/runs/`. Everything here was measured on one
 laptop, so the absolute numbers are specific to it.
 
 ## Limits

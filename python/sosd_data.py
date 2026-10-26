@@ -5,7 +5,8 @@ downsamples each one to a size this project's benchmarks can handle.
 usage: python3 python/sosd_data.py [--n 10000000] [--outdir data] [names...]
 
 The datasets are 200M or 800M sorted keys each. Each file is streamed,
-decompressed (zstd, from Python's standard library, 3.14+), checked
+decompressed (zstd: Python's standard library has it from 3.14; on older
+versions the download goes through the curl and zstd tools), checked
 against the MD5 that SOSD's own download script lists, and downsampled
 on the way in by keeping every k-th key, the way SOSD shrinks its 800M
 datasets to 200M. Nothing bigger than the output ever sits on disk.
@@ -20,13 +21,19 @@ int64, no header. Two adjustments, both printed:
 """
 
 import argparse
+import contextlib
 import hashlib
 import os
+import subprocess
 import sys
 import urllib.request
 
 import numpy as np
-from compression import zstd
+
+try:
+    from compression import zstd
+except ImportError:  # before Python 3.14
+    zstd = None
 
 DATAVERSE = "https://dataverse.harvard.edu/api/access/datafile/:persistentId?persistentId=doi:10.7910/DVN/JGVF9A/"
 # name: (url, md5 of the decompressed file, bytes per key), from SOSD's scripts/download.sh
@@ -44,13 +51,31 @@ CHUNK_KEYS = 1 << 22
 USER_AGENT = "learned-index-db sosd_data.py (github.com/asood8/Learned-Index)"
 
 
+@contextlib.contextmanager
+def download(url: str):
+    """Yields the decompressed contents of url as a stream."""
+    if zstd is not None:
+        # Harvard Dataverse refuses urllib's default User-Agent (HTTP 403)
+        request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+        with urllib.request.urlopen(request) as response, zstd.ZstdFile(response) as stream:
+            yield stream
+        return
+    curl = subprocess.Popen(["curl", "-sSfL", "-A", USER_AGENT, url], stdout=subprocess.PIPE)
+    unzstd = subprocess.Popen(["zstd", "-dcq"], stdin=curl.stdout, stdout=subprocess.PIPE)
+    curl.stdout.close()  # so zstd sees the end of the input when curl exits
+    try:
+        yield unzstd.stdout
+    finally:
+        unzstd.stdout.close()
+        if unzstd.wait() != 0 or curl.wait() != 0:
+            sys.exit(f"downloading or decompressing {url} failed")
+
+
 def fetch(name: str, target: int, outdir: str) -> None:
     url, md5_expected, width = DATASETS[name]
     dtype = np.dtype("<u4") if width == 4 else np.dtype("<u8")
     md5 = hashlib.md5()
-    # Harvard Dataverse refuses urllib's default User-Agent (HTTP 403)
-    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-    with urllib.request.urlopen(request) as response, zstd.ZstdFile(response) as stream:
+    with download(url) as stream:
         header = stream.read(8)
         md5.update(header)
         count = int.from_bytes(header, "little")

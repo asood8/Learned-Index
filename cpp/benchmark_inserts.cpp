@@ -36,6 +36,7 @@
 #include <vector>
 
 #include "bplus_tree.h"
+#include "csv_out.h"
 #include "gapped_array.h"
 #include "tlx_baseline.h"
 
@@ -73,11 +74,9 @@ int main(int argc, char** argv) {
   std::printf("%-9s %14s %12s %12s %12s   %s\n", "order", "gapped array", "B+-tree", "tlx 256 B", "tlx 512 B",
               "gapped array refreshes");
 
-  // results/phase3_inserts.csv has the pre-v4 runs, without an order
-  // column; these go in their own file
-  const bool new_file = !std::ifstream("results/inserts.csv").good();
-  std::ofstream csv("results/inserts.csv", std::ios::app);
-  if (new_file) csv << "path,n,structure,order,ns_per_insert\n";
+  // results/history/phase3_inserts.csv has the pre-v4 runs, without an
+  // order column; these go in their own file
+  std::ofstream csv = open_csv("inserts.csv", "path,n,structure,order,ns_per_insert");
   const char* orders[4] = {"sorted", "shuffled", "append", "spread"};
   for (int order = 0; order < 4; order++) {
     // ~10% held out, scattered across the whole range (the same split as
@@ -149,10 +148,10 @@ int main(int argc, char** argv) {
                 orders[order], ga_ns, tree_ns, tlx_default_ns, tlx_wide_ns, ga.local_rebalance_count(),
                 ga.widened_refresh_count(), ga.rebalance_count(),
                 static_cast<double>(ga.relaid_slot_count()) / holdout.size(), 100.0 * ga.size() / ga.capacity());
-    csv << path << "," << n << ",gapped_array," << orders[order] << "," << ga_ns << "\n";
-    csv << path << "," << n << ",bplus_tree," << orders[order] << "," << tree_ns << "\n";
-    csv << path << "," << n << ",tlx_256," << orders[order] << "," << tlx_default_ns << "\n";
-    csv << path << "," << n << ",tlx_512," << orders[order] << "," << tlx_wide_ns << "\n";
+    csv << csv_field(path) << "," << n << ",gapped_array," << orders[order] << "," << ga_ns << "\n";
+    csv << csv_field(path) << "," << n << ",bplus_tree," << orders[order] << "," << tree_ns << "\n";
+    csv << csv_field(path) << "," << n << ",tlx_256," << orders[order] << "," << tlx_default_ns << "\n";
+    csv << csv_field(path) << "," << n << ",tlx_512," << orders[order] << "," << tlx_wide_ns << "\n";
   }
 
   // the old baseline: a plain sorted vector, which shifts everything
@@ -166,6 +165,6 @@ int main(int argc, char** argv) {
   });
   std::printf("\nplain sorted vector, for context: %.1f ns/insert (a %zu-insert sample, O(n) each)\n", vector_ns,
               sample.size());
-  csv << path << "," << n << ",naive_vector,sorted," << vector_ns << "\n";
+  csv << csv_field(path) << "," << n << ",naive_vector,sorted," << vector_ns << "\n";
   return 0;
 }

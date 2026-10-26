@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "bplus_tree.h"
+#include "csv_out.h"
 #include "linear_model.h"
 #include "segmented_model.h"
 
@@ -145,11 +146,11 @@ int main(int argc, char** argv) {
   std::printf("segmented index:  %8.1f ns/lookup\n", seg_ns);
   std::printf("(median of %d interleaved passes)\n\n", passes);
 
-  std::ofstream csv("results/phase0_baseline.csv", std::ios::app);
-  csv << path << "," << n << "," << num_queries << ",binary_search," << bs_ns << "\n";
-  csv << path << "," << n << "," << num_queries << ",bplus_tree," << bt_ns << "\n";
-  csv << path << "," << n << "," << num_queries << ",learned_index," << li_ns << "\n";
-  csv << path << "," << n << "," << num_queries << ",segmented_index," << seg_ns << "\n";
+  std::ofstream csv = open_csv("phase0_baseline.csv", "path,n,num_queries,structure,ns_per_lookup");
+  csv << csv_field(path) << "," << n << "," << num_queries << ",binary_search," << bs_ns << "\n";
+  csv << csv_field(path) << "," << n << "," << num_queries << ",bplus_tree," << bt_ns << "\n";
+  csv << csv_field(path) << "," << n << "," << num_queries << ",learned_index," << li_ns << "\n";
+  csv << csv_field(path) << "," << n << "," << num_queries << ",segmented_index," << seg_ns << "\n";
 
   return 0;
 }

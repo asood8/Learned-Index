@@ -35,6 +35,7 @@
 #include <vector>
 
 #include "catalog.h"
+#include "csv_out.h"
 #include "durable_store.h"
 #include "executor.h"
 #include "sql_parser.h"
@@ -105,10 +106,10 @@ int main(int argc, char** argv) {
   if (shift > 0) std::printf(" (keys shifted right %d bits to fit 48)", shift);
   std::printf(" ==\n");
 
-  std::ofstream csv("results/engine.csv", std::ios::app);
+  std::ofstream csv = open_csv("engine.csv", "path,index,metric,value");
   auto report = [&](const char* metric, double value, const char* unit) {
     std::printf("  %-44s %12.1f %s\n", metric, value, unit);
-    csv << argv[1] << "," << index_name << "," << metric << "," << value << "\n";
+    csv << csv_field(argv[1]) << "," << csv_field(index_name) << "," << csv_field(metric) << "," << value << "\n";
   };
 
   // ---- load, in random order, one INSERT statement per row ----

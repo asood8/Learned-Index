@@ -37,6 +37,7 @@
 #include <vector>
 
 #include "bplus_tree.h"
+#include "csv_out.h"
 #include "gapped_array.h"
 #include "segmented_model.h"
 #include "tlx_baseline.h"
@@ -175,7 +176,7 @@ int main(int argc, char** argv) {
                                     "tlx B+-tree (512-byte nodes)",
                                     "Phase 2 model, dense array",
                                     "gapped array (what the db uses)"};
-  std::ofstream csv("results/db_lookups.csv", std::ios::app);
+  std::ofstream csv = open_csv("db_lookups.csv", "path,when,structure,hit_ns,miss_ns");
   std::printf("== %s: %zu keys built, %zu held out ==\n", path.c_str(), initial.size(), holdout.size());
   std::printf("%zu random hits and %zu misses, median of %d interleaved passes, ns/lookup\n\n", query_count,
               query_count, passes);
@@ -183,7 +184,7 @@ int main(int argc, char** argv) {
   for (int s = 0; s < kStructures; s++) {
     const double hit_ns = median(t[s][0]), miss_ns = median(t[s][1]);
     std::printf("%-34s %10.1f %10.1f\n", names[s], hit_ns, miss_ns);
-    csv << path << ",fresh," << names[s] << "," << hit_ns << "," << miss_ns << "\n";
+    csv << csv_field(path) << ",fresh," << csv_field(names[s]) << "," << hit_ns << "," << miss_ns << "\n";
   }
 
   // Memory per key, freshly built.
@@ -206,11 +207,11 @@ int main(int argc, char** argv) {
       {names[5], (ga.capacity() * sizeof(int64_t) + gapped_model_bytes) / n, gapped_model_bytes / n,
        "keys + empty slots + segments"},
   };
-  std::ofstream mem_csv("results/db_memory.csv", std::ios::app);
+  std::ofstream mem_csv = open_csv("db_memory.csv", "path,structure,bytes_per_key,routing_bytes_per_key");
   std::printf("\n%-34s %12s %14s\n", "memory, bytes per key", "whole thing", "routing only");
   for (const MemoryRow& row : memory) {
     std::printf("%-34s %12.2f %14.4f   %s\n", row.name, row.total, row.routing, row.note);
-    mem_csv << path << "," << row.name << "," << row.total << "," << row.routing << "\n";
+    mem_csv << csv_field(path) << "," << csv_field(row.name) << "," << row.total << "," << row.routing << "\n";
   }
 
   // Insert the held-out keys. The gapped array absorbs them with local
@@ -256,7 +257,7 @@ int main(int argc, char** argv) {
   for (int s = 0; s < kStructures; s++) {
     const double hit_ns = median(u[s]);
     std::printf("%-34s %10.1f\n", after_names[s], hit_ns);
-    csv << path << ",after_inserts," << after_names[s] << "," << hit_ns << ",-1\n";
+    csv << csv_field(path) << ",after_inserts," << csv_field(after_names[s]) << "," << hit_ns << ",\n";  // misses not timed
   }
   return 0;
 }

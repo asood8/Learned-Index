@@ -10,6 +10,7 @@
 #include <random>
 #include <vector>
 
+#include "csv_out.h"
 #include "key_generators.h"
 #include "segmented_model.h"
 #include "third_party/pgm/pgm_index.hpp"
@@ -30,7 +31,7 @@ double median(std::vector<double> v) {
   return (n % 2 == 1) ? v[n / 2] : (v[n / 2 - 1] + v[n / 2]) / 2.0;
 }
 
-void run_comparison(const std::vector<int64_t>& keys, const std::string& name) {
+void run_comparison(const std::vector<int64_t>& keys, const std::string& name, std::ofstream& csv) {
   const size_t n = keys.size();
   const int num_queries = 100000;
   std::mt19937_64 rng(777);
@@ -102,7 +103,6 @@ void run_comparison(const std::vector<int64_t>& keys, const std::string& name) {
   std::printf("  memory       -- ours (pinned): %7zu   ours (optimal): %7zu   PGM-index: %7zu  bytes\n\n", ours_bytes,
               optimal_bytes, pgm_bytes);
 
-  std::ofstream csv("results/phase7b_pgm_comparison.csv", std::ios::app);
   csv << name << "," << n << ",ours," << ours_ns << "," << ours_bytes << "," << ours_segments << "\n";
   csv << name << "," << n << ",ours_optimal," << optimal_ns << "," << optimal_bytes << "," << optimal_segments << "\n";
   csv << name << "," << n << ",pgm_index," << pgm_ns << "," << pgm_bytes << "," << pgm_segments << "\n";
@@ -110,14 +110,17 @@ void run_comparison(const std::vector<int64_t>& keys, const std::string& name) {
 }
 
 int main() {
-  std::ofstream csv("results/phase7b_pgm_comparison.csv");
+  // One stream for the whole file. This used to open a second, appending
+  // stream per dataset while this one still held the header in its
+  // buffer, and flushing it at exit wrote the header over the first row.
+  std::ofstream csv(results_path("phase7b_pgm_comparison.csv"));
   csv << "dataset,n,structure,ns_per_lookup,memory_bytes,segments\n";
 
   std::vector<int64_t> uniform = gen_uniform(1000000, 100);
-  run_comparison(uniform, "uniform");
+  run_comparison(uniform, "uniform", csv);
 
   std::vector<int64_t> skewed = gen_skewed(1000000, 200);
-  run_comparison(skewed, "skewed");
+  run_comparison(skewed, "skewed", csv);
 
   return 0;
 }
