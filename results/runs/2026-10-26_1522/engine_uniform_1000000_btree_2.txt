@@ -1,0 +1,22 @@
+== B+-tree (tlx), data/uniform_1000000.bin: 899735 rows loaded, 100265 held out for inserts ==
+  load, random order (ns/row)                        2564.7 ns
+  memory after the load (bytes/row)                   115.2 B
+  open from the log (ms)                              744.1 ms
+  open from a snapshot (ms)                           224.5 ms
+  memory after opening the snapshot (bytes/row)         94.3 B
+  point lookup, parsed ahead of time (ns)             684.4 ns
+  point lookup for a missing id (ns)                  605.6 ns
+  point lookup, parsed each time (ns)                1562.0 ns
+    of which the store's own lookup (ns)              666.2 ns
+  range scan of 10 rows (ns)                         1364.7 ns
+  range scan of 100 rows (ns)                       10570.1 ns
+  range scan of 1000 rows (ns)                      94242.4 ns
+  insert, random order (ns)                          2584.6 ns
+  insert, appended past the end (ns)                 1739.4 ns
+  95% reads, 5% inserts following the data (ns/op)        904.7 ns
+  50% reads, 50% inserts following the data (ns/op)       1341.0 ns
+  50% reads, 50% inserts spread evenly (ns/op)       1479.4 ns
+  durable insert, fsync every 1 (ns)              2260178.8 ns
+  durable insert, fsync every 8 (ns)               212624.9 ns
+  durable insert, fsync every 64 (ns)               32168.6 ns
+  durable insert, fsync every 512 (ns)               8321.5 ns

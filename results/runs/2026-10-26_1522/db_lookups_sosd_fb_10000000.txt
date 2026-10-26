@@ -1,0 +1,26 @@
+== data/sosd_fb_10000000.bin: 9000430 keys built, 999570 held out ==
+200000 random hits and 200000 misses, median of 7 interleaved passes, ns/lookup
+
+freshly built                            hits     misses
+binary search                           537.8      641.2
+B+-tree (bplus_tree.h)                 1007.7      911.4
+tlx B+-tree (256-byte nodes)            540.4      520.7
+tlx B+-tree (512-byte nodes)            494.4      440.7
+Phase 2 model, dense array              291.7      336.3
+gapped array (what the db uses)         393.2      433.8
+
+memory, bytes per key               whole thing   routing only
+binary search                              8.00         0.0000   just the keys
+B+-tree (bplus_tree.h)                    37.35         1.6013   also stores an 8-byte value per key
+tlx B+-tree (256-byte nodes)               9.28         0.5313   leaves full (bulk-loaded)
+tlx B+-tree (512-byte nodes)               8.63         0.2541   leaves full (bulk-loaded)
+Phase 2 model, dense array                 8.04         0.0396   read-only; no room for inserts
+gapped array (what the db uses)           11.50         0.0695   keys + empty slots + segments
+
+after inserting the 999570 held-out keys (2852 local + 0 full rebalances)
+binary search (rebuilt array)           469.8
+B+-tree (bplus_tree.h)                  977.8
+tlx B+-tree (256-byte nodes)            847.7
+tlx B+-tree (512-byte nodes)            639.2
+Phase 2 model (rebuilt)                 373.3
+gapped array (what the db uses)         496.7

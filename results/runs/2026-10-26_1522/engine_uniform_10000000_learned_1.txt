@@ -1,0 +1,22 @@
+== learned index, data/uniform_10000000.bin: 9000430 rows loaded, 999570 held out for inserts ==
+  load, random order (ns/row)                        3525.2 ns
+  memory after the load (bytes/row)                    85.2 B
+  open from the log (ms)                             7913.4 ms
+  open from a snapshot (ms)                          1742.2 ms
+  memory after opening the snapshot (bytes/row)         89.2 B
+  point lookup, parsed ahead of time (ns)            1181.3 ns
+  point lookup for a missing id (ns)                  462.0 ns
+  point lookup, parsed each time (ns)                1839.2 ns
+    of which the store's own lookup (ns)              717.9 ns
+  range scan of 10 rows (ns)                         1612.9 ns
+  range scan of 100 rows (ns)                       11439.9 ns
+  range scan of 1000 rows (ns)                      92992.7 ns
+  insert, random order (ns)                          3185.2 ns
+  insert, appended past the end (ns)                 6592.0 ns
+  95% reads, 5% inserts following the data (ns/op)       1598.0 ns
+  50% reads, 50% inserts following the data (ns/op)       1790.1 ns
+  50% reads, 50% inserts spread evenly (ns/op)       1812.2 ns
+  durable insert, fsync every 1 (ns)              1788742.5 ns
+  durable insert, fsync every 8 (ns)               193536.3 ns
+  durable insert, fsync every 64 (ns)               34368.5 ns
+  durable insert, fsync every 512 (ns)               9306.3 ns

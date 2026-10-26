@@ -70,3 +70,51 @@ data/sosd_wiki_10000000.bin,tlx B+-tree (256-byte nodes),9.28135,0.53132
 data/sosd_wiki_10000000.bin,tlx B+-tree (512-byte nodes),8.62918,0.254156
 data/sosd_wiki_10000000.bin,Phase 2 model, dense array,8.01166,0.0116556
 data/sosd_wiki_10000000.bin,gapped array (what the db uses),11.4433,0.0147229
+data/uniform_1000000.bin,binary search,8,0
+data/uniform_1000000.bin,B+-tree (bplus_tree.h),37.3488,1.59861
+data/uniform_1000000.bin,tlx B+-tree (256-byte nodes),9.28185,0.531765
+data/uniform_1000000.bin,tlx B+-tree (512-byte nodes),8.63199,0.256609
+data/uniform_1000000.bin,Phase 2 model, dense array,8.00203,0.00202726
+data/uniform_1000000.bin,gapped array (what the db uses),11.435,0.00645523
+data/skewed_1000000.bin,binary search,8,0
+data/skewed_1000000.bin,B+-tree (bplus_tree.h),37.3488,1.59861
+data/skewed_1000000.bin,tlx B+-tree (256-byte nodes),9.28185,0.531765
+data/skewed_1000000.bin,tlx B+-tree (512-byte nodes),8.63199,0.256609
+data/skewed_1000000.bin,Phase 2 model, dense array,8.00395,0.00394783
+data/skewed_1000000.bin,gapped array (what the db uses),11.4359,0.00736217
+data/uniform_10000000.bin,binary search,8,0
+data/uniform_10000000.bin,B+-tree (bplus_tree.h),37.3514,1.60131
+data/uniform_10000000.bin,tlx B+-tree (256-byte nodes),9.28136,0.531342
+data/uniform_10000000.bin,tlx B+-tree (512-byte nodes),8.62911,0.254095
+data/uniform_10000000.bin,Phase 2 model, dense array,8.00203,0.00202924
+data/uniform_10000000.bin,gapped array (what the db uses),11.435,0.00642103
+data/skewed_10000000.bin,binary search,8,0
+data/skewed_10000000.bin,B+-tree (bplus_tree.h),37.3514,1.60131
+data/skewed_10000000.bin,tlx B+-tree (256-byte nodes),9.28136,0.531342
+data/skewed_10000000.bin,tlx B+-tree (512-byte nodes),8.62911,0.254095
+data/skewed_10000000.bin,Phase 2 model, dense array,8.00245,0.00245055
+data/skewed_10000000.bin,gapped array (what the db uses),11.4352,0.00661035
+data/sosd_books_10000000.bin,binary search,8,0
+data/sosd_books_10000000.bin,B+-tree (bplus_tree.h),37.3514,1.60131
+data/sosd_books_10000000.bin,tlx B+-tree (256-byte nodes),9.28136,0.531342
+data/sosd_books_10000000.bin,tlx B+-tree (512-byte nodes),8.62911,0.254095
+data/sosd_books_10000000.bin,Phase 2 model, dense array,8.00119,0.00119194
+data/sosd_books_10000000.bin,gapped array (what the db uses),11.4346,0.00604771
+data/sosd_fb_10000000.bin,binary search,8,0
+data/sosd_fb_10000000.bin,B+-tree (bplus_tree.h),37.3514,1.60131
+data/sosd_fb_10000000.bin,tlx B+-tree (256-byte nodes),9.28136,0.531342
+data/sosd_fb_10000000.bin,tlx B+-tree (512-byte nodes),8.62911,0.254095
+data/sosd_fb_10000000.bin,Phase 2 model, dense array,8.03962,0.0396248
+data/sosd_fb_10000000.bin,gapped array (what the db uses),11.4981,0.0695087
+data/sosd_osm_10000000.bin,binary search,8,0
+data/sosd_osm_10000000.bin,B+-tree (bplus_tree.h),37.3514,1.60131
+data/sosd_osm_10000000.bin,tlx B+-tree (256-byte nodes),9.28136,0.531342
+data/sosd_osm_10000000.bin,tlx B+-tree (512-byte nodes),8.62911,0.254095
+data/sosd_osm_10000000.bin,Phase 2 model, dense array,8.05109,0.0510856
+data/sosd_osm_10000000.bin,gapped array (what the db uses),11.5008,0.0722525
+data/sosd_wiki_10000000.bin,binary search,8,0
+data/sosd_wiki_10000000.bin,B+-tree (bplus_tree.h),37.3514,1.60134
+data/sosd_wiki_10000000.bin,tlx B+-tree (256-byte nodes),9.28135,0.53132
+data/sosd_wiki_10000000.bin,tlx B+-tree (512-byte nodes),8.62918,0.254156
+data/sosd_wiki_10000000.bin,Phase 2 model, dense array,8.01166,0.0116556
+data/sosd_wiki_10000000.bin,gapped array (what the db uses),11.4433,0.0147229

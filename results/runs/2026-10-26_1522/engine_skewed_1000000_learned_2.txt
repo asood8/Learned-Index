@@ -1,0 +1,22 @@
+== learned index, data/skewed_1000000.bin: 899726 rows loaded, 100264 held out for inserts (keys shifted right 2 bits to fit 48) ==
+  load, random order (ns/row)                        3003.4 ns
+  memory after the load (bytes/row)                    81.0 B
+  open from the log (ms)                              460.2 ms
+  open from a snapshot (ms)                           145.1 ms
+  memory after opening the snapshot (bytes/row)         89.2 B
+  point lookup, parsed ahead of time (ns)             613.8 ns
+  point lookup for a missing id (ns)                  235.9 ns
+  point lookup, parsed each time (ns)                1582.7 ns
+    of which the store's own lookup (ns)              399.2 ns
+  range scan of 10 rows (ns)                         1275.5 ns
+  range scan of 100 rows (ns)                       10892.3 ns
+  range scan of 1000 rows (ns)                      90509.8 ns
+  insert, random order (ns)                          2756.6 ns
+  insert, appended past the end (ns)                 3413.5 ns
+  95% reads, 5% inserts following the data (ns/op)        763.6 ns
+  50% reads, 50% inserts following the data (ns/op)       1378.0 ns
+  50% reads, 50% inserts spread evenly (ns/op)       2207.2 ns
+  durable insert, fsync every 1 (ns)              2199091.3 ns
+  durable insert, fsync every 8 (ns)               196437.5 ns
+  durable insert, fsync every 64 (ns)               37630.9 ns
+  durable insert, fsync every 512 (ns)               8266.1 ns

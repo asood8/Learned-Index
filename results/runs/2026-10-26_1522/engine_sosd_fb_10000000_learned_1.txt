@@ -1,0 +1,22 @@
+== learned index, data/sosd_fb_10000000.bin: 9000430 rows loaded, 999570 held out for inserts ==
+  load, random order (ns/row)                        3125.1 ns
+  memory after the load (bytes/row)                    88.4 B
+  open from the log (ms)                             7454.7 ms
+  open from a snapshot (ms)                          1692.3 ms
+  memory after opening the snapshot (bytes/row)         89.3 B
+  point lookup, parsed ahead of time (ns)            1139.6 ns
+  point lookup for a missing id (ns)                  649.3 ns
+  point lookup, parsed each time (ns)                2124.3 ns
+    of which the store's own lookup (ns)              788.7 ns
+  range scan of 10 rows (ns)                         1787.3 ns
+  range scan of 100 rows (ns)                       11688.7 ns
+  range scan of 1000 rows (ns)                      92461.4 ns
+  insert, random order (ns)                          2635.1 ns
+  insert, appended past the end (ns)                 6060.5 ns
+  95% reads, 5% inserts following the data (ns/op)       1618.1 ns
+  50% reads, 50% inserts following the data (ns/op)       1662.4 ns
+  50% reads, 50% inserts spread evenly (ns/op)       4761.3 ns
+  durable insert, fsync every 1 (ns)              2495533.1 ns
+  durable insert, fsync every 8 (ns)               212751.0 ns
+  durable insert, fsync every 64 (ns)               31974.2 ns
+  durable insert, fsync every 512 (ns)               6940.8 ns

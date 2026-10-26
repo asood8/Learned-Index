@@ -1,0 +1,22 @@
+== B+-tree (tlx), data/skewed_1000000.bin: 899726 rows loaded, 100264 held out for inserts (keys shifted right 2 bits to fit 48) ==
+  load, random order (ns/row)                        2634.6 ns
+  memory after the load (bytes/row)                   115.2 B
+  open from the log (ms)                              784.7 ms
+  open from a snapshot (ms)                           214.2 ms
+  memory after opening the snapshot (bytes/row)         94.3 B
+  point lookup, parsed ahead of time (ns)             747.1 ns
+  point lookup for a missing id (ns)                  639.3 ns
+  point lookup, parsed each time (ns)                1593.8 ns
+    of which the store's own lookup (ns)              569.6 ns
+  range scan of 10 rows (ns)                         1377.2 ns
+  range scan of 100 rows (ns)                       11461.9 ns
+  range scan of 1000 rows (ns)                      94362.5 ns
+  insert, random order (ns)                          2609.2 ns
+  insert, appended past the end (ns)                 1950.7 ns
+  95% reads, 5% inserts following the data (ns/op)        920.0 ns
+  50% reads, 50% inserts following the data (ns/op)       1225.5 ns
+  50% reads, 50% inserts spread evenly (ns/op)       1067.4 ns
+  durable insert, fsync every 1 (ns)              1699972.4 ns
+  durable insert, fsync every 8 (ns)               276438.1 ns
+  durable insert, fsync every 64 (ns)               46937.8 ns
+  durable insert, fsync every 512 (ns)               7712.4 ns

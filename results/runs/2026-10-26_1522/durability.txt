@@ -1,0 +1,10 @@
+fresh store: recovered 0 entries from an empty log (expected 0)
+wrote 5000 keys via put() (each logged + fsync'd before applying)
+
+-- simulated restart: constructing a brand new DurableStore --
+recovered 5000 entries by replaying the log
+durability check passed: all 5000 keys AND their values survived the restart
+
+durable put() (log + fsync + insert + value):  2003329.6 ns/op
+plain insert() (no WAL, no value at all):           828.3 ns/op
+durability overhead: ~2419x

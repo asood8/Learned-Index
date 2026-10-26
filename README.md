@@ -29,50 +29,55 @@ secondary indexes, `EXPLAIN`, crash recovery, checkpointing, and a REPL.
 ## Results
 
 All of these come from one run of `scripts/run_benchmarks.sh` on my
-laptop (an Intel i7-13620H, under WSL2) on October 25, 2026. The raw
-output, along with the machine, compiler and commit it came from, is in
-`results/runs/2026-10-25_1112/`. Lookup times are medians over
-interleaved passes, and the whole-database comparisons are medians of
-three runs of each build. On this machine the same benchmark can move
-10–20% from one run to the next, so the ratios mean more than the exact
-nanoseconds, and differences smaller than that don't mean much.
+laptop (an Intel i7-13620H, under WSL2) on October 26, 2026, with
+nothing else running. The raw output, along with the machine, compiler
+and commit it came from, is in `results/runs/2026-10-26_1522/`. Lookup
+times are medians over interleaved passes, and the whole-database
+comparisons are medians of three runs of each build. On this machine
+the same benchmark can move 10–20% from one run to the next, so the
+ratios mean more than the exact nanoseconds, and differences smaller
+than that don't mean much. Earlier runs on the same laptop, made with
+other programs open, are in `results/runs/` too; the 10M-key lookups
+moved the most between runs, so treat those with the most care.
 Everything is on 1M keys unless it says otherwise.
 
 | | result |
 |---|---|
-| Point lookup in the storage engine | 128.4 ns on uniform keys, 124.1 ns on skewed. tlx's B+-tree: 204.3 and 181.3 ns. Binary search: 175.5 and 173.4 ns |
-| The same at 10M keys | 308.7 and 397.6 ns. tlx: 425.1 and 434.4 ns |
-| The same on four real datasets (10M keys) | from 1.30x tlx's speed down to 0.91x: faster on two, even on one, slower on one |
-| The same lookup through SQL, the whole database on each index | 4–7% faster than the same database built on tlx |
+| Point lookup in the storage engine | 124.5 ns on uniform keys, 131.4 ns on skewed. tlx's B+-tree: 191.8 and 187.4 ns. Binary search: 178.6 and 183.3 ns |
+| The same at 10M keys | 362.7 and 430.2 ns. tlx: 390.6 and 439.0 ns |
+| The same on four real datasets (10M keys) | 1.16–1.43x tlx's speed |
+| The same lookup through SQL, the whole database on each index | 6–9% faster than the same database built on tlx |
 | Memory | the model takes 0.0065–0.0074 bytes per key, against 0.26–0.53 for tlx's inner nodes. The whole gapped array takes 11.4 bytes per key, against 8.6–9.3 for tlx |
-| Inserts in random order | 398 ns uniform, 482 ns skewed. tlx: 326 and 385 ns |
-| Inserts in increasing order | about 300 ns, roughly 2.4x slower than tlx. Appends past the end: 466–577 ns, 12–15x slower than tlx |
-| vs. the published PGM-index | faster on skewed data (98.1 vs 122.2 ns), and even to faster on uniform data depending on the run |
-| Secondary index lookup | 20.4x faster than the full scan it replaces, on a 1,000-row table |
-| Checkpointing | opening a store went from 9.83 ms to 0.49 ms |
+| Inserts in random order | 482 ns uniform, 408 ns skewed. tlx: 317 and 386 ns |
+| Inserts in increasing order | about 310 ns, roughly 2.2–2.4x slower than tlx. Appends past the end: 456–582 ns, 12–15x slower than tlx |
+| vs. the published PGM-index | about even on uniform data (90.6 vs 93.2 ns), faster on skewed (100.4 vs 123.0 ns) |
+| Secondary index lookup | 22.3x faster than the full scan it replaces, on a 1,000-row table |
+| Checkpointing | opening a store went from 7.55 ms to 0.47 ms |
 | Learned Bloom filter | lost badly: 50.4% false positives vs 1.021% for a normal one |
 
 A few notes on these.
 
 The comparison that matters is the one against tlx. I wrote my own
 B+-tree as the first baseline, and the learned index beats it by
-2.3–2.8x, but mine allocates every node separately and was never tuned,
+2.2–2.6x, but mine allocates every node separately and was never tuned,
 so that mostly says my B+-tree is slow. tlx is a maintained library (it
 replaced the stx B+-tree that the SOSD learned-index benchmark uses). I
 tried it with node sizes from 128 bytes to 2 KB, and against its fastest
-setting, 512-byte nodes, the learned index's lookups are 1.5–1.6x faster
-at 1M keys and 1.1–1.4x faster at 10M. On real datasets it ranges from
-30% faster (books) to 9% slower (osm). That's the same direction the
+setting, 512-byte nodes, the learned index's lookups are 1.4–1.5x faster
+at 1M keys, and 1.16–1.43x faster on four real datasets. At 10M
+synthetic keys the gap is small and unstable: 1.02–1.08x in this run,
+1.09–1.38x in an earlier one. That's the same direction the
 learned-index papers report, and a smaller gap than the numbers usually
 quoted.
 
 Inside the whole database, most of that disappears. Running the same
-SQL on the same engine built on tlx, a point lookup is 11–15% faster on
-the learned index when the statement is already parsed, and 4–7% faster
-when it isn't, because parsing, planning and turning bytes back into a
-row cost more than the lookup itself. Appends are 2–3x slower, and
+SQL on the same engine built on tlx, a point lookup is 5–9% faster on
+the learned index when the statement is already parsed, and 6–9% faster
+when it isn't. Partly that's because parsing, planning and turning bytes
+back into a row cost more than the lookup itself, and partly because a
+lookup saves less time inside a query than in a tight loop. Appends are 1.9–3.4x slower, and
 inserts that don't follow the existing key distribution can be up to
-3.4x slower. "The whole database on each index" below has the details.
+2.9x slower. "The whole database on each index" below has the details.
 
 The memory result is real, but smaller than it sounds. The model is
 35–80 times smaller than tlx's inner nodes, and over 200 times smaller
@@ -208,8 +213,8 @@ the tables.)
 A single line only works if the data is close to uniform. On the skewed
 dataset, the best single line is off by up to 15.7M positions in an
 array of 1M keys, so the "local" search ends up covering the whole
-array. In practice that's 209.2 ns per lookup, which is slower than
-plain binary search at 185.6 ns.
+array. In practice that's 232.1 ns per lookup, which is slower than
+plain binary search at 177.4 ns.
 
 So the model is split into pieces. `build_segmented_model` goes through
 the sorted keys once, extending the current segment as long as one line
@@ -220,8 +225,8 @@ at the segment's first point, each new key just narrows down which
 slopes are still allowed, so building the whole model takes one pass
 over the data. This is the same greedy method as FITing-tree's
 ShrinkingCone algorithm (Galakatos et al., 2019). On 1M keys it gives 84
-segments for uniform data and 151 for skewed, with lookups at 93.3 and
-105.0 ns.
+segments for uniform data and 151 for skewed, with lookups at 95.6 and
+96.8 ns.
 
 To use a segment, a lookup first has to find it, with a binary search
 over the segments' starting keys. That turned out to be about a third of
@@ -294,7 +299,7 @@ leaves a few segments that cover most of the key range but hold few keys.
 Inserts spread evenly over the key range pour into those small regions,
 which fill almost at once and keep borrowing from their neighbors. On 1M
 skewed keys, that re-lays 161 slots per insert instead of the usual 49,
-and the inserts take 1,110 ns instead of 395 (the "spread" rows under
+and the inserts take 1,229 ns instead of 408 (the "spread" rows under
 Inserts below). A B+-tree only splits the leaf that's full, so it
 doesn't care where inserts land.
 
@@ -309,7 +314,7 @@ and cut back to the last complete record. That second part fixed a real
 bug: an earlier version skipped over a half-written record but left its
 bytes in the file, and new writes got appended after them.
 
-An fsync takes about 1.4 ms on this laptop, far more than anything else
+An fsync takes about 2 ms on this laptop, far more than anything else
 a write does, so the log can also fsync only every k-th write. Every
 record still reaches the operating system before the write returns, so
 a crash of the process loses nothing, but up to k − 1 writes can be lost
@@ -331,7 +336,7 @@ applied to it (for each key, the last record logged for it wins), and
 the array is built once from the result. It used to replay the log one
 insert at a time, which took 59.8 s for a log of 1M writes. For a store
 of 2,000 rows that had each been written ten times, so 20,000 log
-records, opening it took 9.83 ms from the log and 0.49 ms after a
+records, opening it took 7.55 ms from the log and 0.47 ms after a
 checkpoint.
 
 ### The SQL layer
@@ -358,8 +363,8 @@ repeat, but the learned index needs unique keys, so each index entry
 combines the indexed value (top 20 bits) with the row's primary key
 (bottom 28 bits). That makes every entry unique and puts all rows with
 the same value next to each other, so a lookup is just a range scan on
-the same gapped array. On a 1,000-row table this was 20.4x faster than
-the full scan it replaced (7,934 vs 161,896 ns). That number moves a lot
+the same gapped array. On a 1,000-row table this was 22.3x faster than
+the full scan it replaced (6,956 vs 155,472 ns). That number moves a lot
 between runs (I've seen 18x to 29x), since each query only takes a few
 microseconds, and on a table this small any index would win.
 
@@ -386,8 +391,8 @@ the storage engine" below.
 
 | 1M keys | binary search | my B+-tree | one line | segmented |
 |---|---|---|---|---|
-| uniform | 185.5 ns | 310.7 ns | 124.2 ns | 93.3 ns |
-| skewed | 185.6 ns | 315.4 ns | 209.2 ns | 105.0 ns |
+| uniform | 184.4 ns | 332.9 ns | 132.8 ns | 95.6 ns |
+| skewed | 177.4 ns | 314.6 ns | 232.1 ns | 96.8 ns |
 
 Besides the segmented column, two things in this table stand out. First,
 plain binary search beats my B+-tree. My B+-tree allocates each node
@@ -399,8 +404,8 @@ whole reason for splitting it into segments.
 
 The results hold up as the data grows. From 100K to 5M keys, the
 segmented index stays ahead of both baselines, and the gap with the
-B+-tree gets wider: at 5M skewed keys it's 173.0 ns, against 521.8 for
-the B+-tree and 370.1 for binary search.
+B+-tree gets wider: at 5M skewed keys it's 192.9 ns, against 627.9 for
+the B+-tree and 415.7 for binary search.
 
 ### Memory
 
@@ -446,19 +451,19 @@ the same data with the same eps.
 
 | 1M keys | mine (pinned) | mine (optimal) | PGM-index |
 |---|---|---|---|
-| uniform | 98.7 ns, 79 segments, 1,896 bytes | 93.5 ns, 57 segments, 1,368 bytes | 112.7 ns, 57 segments, 984 bytes |
-| skewed | 98.1 ns, 157 segments, 3,768 bytes | 94.5 ns, 126 segments, 3,024 bytes | 122.2 ns, 126 segments, 2,192 bytes |
+| uniform | 90.6 ns, 79 segments, 1,896 bytes | 87.3 ns, 57 segments, 1,368 bytes | 93.2 ns, 57 segments, 984 bytes |
+| skewed | 100.4 ns, 157 segments, 3,768 bytes | 97.7 ns, 126 segments, 3,024 bytes | 123.0 ns, 126 segments, 2,192 bytes |
 
-Mine is faster on skewed data. On uniform data it depends on the run:
-PGM took 112.7 ns here and 97.5 ns in the run before, while mine took
-about 98 both times, so "even to faster" is as far as I'd go. That's
-recent: before the branchless segment search described above, PGM was
-clearly faster on uniform data (89.5 vs 124.0 ns, in an earlier session).
+Mine is faster on skewed data and about even on uniform data. PGM's
+uniform number moves between runs (93.2 ns here, 97.5 and 112.7 in two
+earlier runs), so "even" is as far as I'd go there. That's recent:
+before the branchless segment search described above, PGM was clearly
+faster on uniform data (89.5 vs 124.0 ns, in an earlier session).
 I left PGM's code as it is. At equal segment counts, the memory
 difference comes down to how segments are stored: PGM uses 16 bytes per
 segment and I use 24, because it stores the slope as a 32-bit float and
 I use a 64-bit double. Turning off PGM's recursive routing layer (a
-template parameter) slows its uniform lookups from 112.7 to 134.0 ns, so
+template parameter) slows its uniform lookups from 93.2 to 106.4 ns, so
 that layer helps.
 
 An earlier version of this README said my index was 2x faster than PGM
@@ -475,29 +480,31 @@ keys.
 
 | 1M keys | uniform, fresh | uniform, after inserts | skewed, fresh | skewed, after inserts |
 |---|---|---|---|---|
-| binary search | 175.5 ns | 184.2 ns | 173.4 ns | 184.7 ns |
-| my B+-tree | 316.9 ns | 315.4 ns | 299.7 ns | 322.4 ns |
-| tlx, 256-byte nodes | 225.6 ns | 310.9 ns | 213.8 ns | 343.3 ns |
-| tlx, 512-byte nodes | 204.3 ns | 243.2 ns | 181.3 ns | 249.3 ns |
-| read-only segmented model | 101.9 ns | 104.5 ns | 101.1 ns | 109.5 ns |
-| gapped array (the database) | 128.4 ns | 135.5 ns | 124.1 ns | 129.4 ns |
+| binary search | 178.6 ns | 181.7 ns | 183.3 ns | 191.5 ns |
+| my B+-tree | 321.5 ns | 315.2 ns | 329.4 ns | 326.7 ns |
+| tlx, 256-byte nodes | 202.9 ns | 312.2 ns | 238.7 ns | 334.4 ns |
+| tlx, 512-byte nodes | 191.8 ns | 258.6 ns | 187.4 ns | 270.8 ns |
+| read-only segmented model | 94.6 ns | 97.7 ns | 96.4 ns | 102.7 ns |
+| gapped array (the database) | 124.5 ns | 126.0 ns | 131.4 ns | 139.4 ns |
 
 | 10M keys | uniform, fresh | uniform, after inserts | skewed, fresh | skewed, after inserts |
 |---|---|---|---|---|
-| binary search | 453.2 ns | 685.0 ns | 560.7 ns | 516.7 ns |
-| my B+-tree | 870.8 ns | 912.3 ns | 921.5 ns | 765.7 ns |
-| tlx, 256-byte nodes | 468.5 ns | 673.8 ns | 548.0 ns | 901.1 ns |
-| tlx, 512-byte nodes | 425.1 ns | 612.9 ns | 434.4 ns | 670.8 ns |
-| read-only segmented model | 202.2 ns | 226.5 ns | 245.8 ns | 215.1 ns |
-| gapped array (the database) | 308.7 ns | 330.0 ns | 397.6 ns | 328.1 ns |
+| binary search | 605.8 ns | 589.8 ns | 571.1 ns | 691.1 ns |
+| my B+-tree | 940.3 ns | 961.7 ns | 942.1 ns | 976.8 ns |
+| tlx, 256-byte nodes | 563.5 ns | 783.8 ns | 478.6 ns | 788.3 ns |
+| tlx, 512-byte nodes | 390.6 ns | 574.9 ns | 439.0 ns | 538.3 ns |
+| read-only segmented model | 232.4 ns | 225.9 ns | 197.0 ns | 251.5 ns |
+| gapped array (the database) | 362.7 ns | 304.2 ns | 430.2 ns | 396.5 ns |
 
-So the database's lookups are 1.5–1.6x faster than tlx at its best at
-1M keys, and 1.1–1.4x faster at 10M, where nothing fits in the
-processor's cache anymore. After inserts the gap widens, because tlx's
-full leaves split and end up half empty, while the gapped array had room
-set aside. Lookups for keys that don't exist cost about the same as ones
-that find something (125.9 vs 128.4 ns on uniform data), since the walk
-does the same amount of work either way.
+So the database's lookups are 1.4–1.5x faster than tlx at its best at
+1M keys, and only 1.02–1.08x faster at 10M, where nothing fits in the
+processor's cache anymore. The 10M numbers moved the most between runs
+on this laptop: an earlier, busier run had them at 1.09–1.38x. After
+inserts the gap widens to 1.4–2.1x, because tlx's full leaves split and
+end up half empty, while the gapped array had room set aside. Lookups
+for keys that don't exist cost about the same as ones that find
+something (124.0 vs 124.5 ns on uniform data), since the walk does the
+same amount of work either way.
 
 An earlier version of this benchmark said the array got *faster* after
 100,000 inserts (162.5 vs 142.0 ns), and I couldn't explain it. It
@@ -523,58 +530,65 @@ osm's keys were shifted right one bit to fit in a signed 64-bit integer.
 
 | 10M keys, fresh | books | fb | osm | wiki |
 |---|---|---|---|---|
-| tlx, 512-byte nodes | 419.0 ns | 410.1 ns | 445.4 ns | 452.9 ns |
-| gapped array (the database) | 322.9 ns | 393.8 ns | 490.0 ns | 366.1 ns |
+| tlx, 512-byte nodes | 458.1 ns | 494.4 ns | 502.5 ns | 479.3 ns |
+| gapped array (the database) | 320.5 ns | 393.2 ns | 433.7 ns | 403.8 ns |
 | model size | 0.0060 bytes/key | 0.0695 | 0.0723 | 0.0147 |
 
-The learned index is 30% faster on books and 24% on wiki, about even on
-fb, and 9% slower on osm. fb and osm are the two datasets SOSD also
-finds hard for learned indexes: they need 5–12 times as many segments
-as the other two. After inserting 10% more keys, the gapped array
-was 1.3–1.6x faster than tlx on all four, again mostly because tlx's
-leaves split.
+The learned index is 1.43x faster on books, 1.26x on fb, 1.16x on osm
+and 1.19x on wiki. osm moved the most between runs: it was 9% slower
+than tlx in an earlier, busier run. fb and osm are the two datasets SOSD
+also finds hard for learned indexes: they need 5–12 times as many
+segments as the other two. After inserting 10% more keys, the gapped
+array was 1.3–1.7x faster than tlx on all four, again mostly because
+tlx's leaves split.
 
 ### Inserts
 
 `cpp/benchmark_inserts.cpp` builds each structure on 90% of the keys and
-inserts the other 10%, in three orders: the held-out keys scattered
+inserts the other 10%, in four orders: the held-out keys scattered
 across the whole range, smallest first ("increasing"); the same keys
-shuffled ("random"); and the largest 10% in order, the way
-auto-increment ids arrive ("appended").
+shuffled ("random"); the largest 10% in order, the way auto-increment
+ids arrive ("appended"); and as many new keys drawn evenly from the
+whole key range instead of from the data, shuffled ("spread"). Each
+order is a single timed pass, since inserting changes the structure, so
+these numbers are noisier than the lookup ones.
 
 | 1M keys, ns per insert | gapped array | my B+-tree | tlx, 256-byte nodes | tlx, 512-byte nodes |
 |---|---|---|---|---|
-| uniform, increasing | 323.1 | 131.2 | 145.2 | 131.2 |
-| uniform, random | 398.3 | 431.5 | 469.4 | 325.9 |
-| uniform, appended | 577.2 | 72.2 | 50.7 | 38.5 |
-| skewed, increasing | 299.9 | 124.7 | 141.8 | 127.9 |
-| skewed, random | 482.4 | 459.0 | 401.0 | 384.7 |
-| skewed, appended | 465.7 | 70.8 | 53.8 | 37.9 |
+| uniform, increasing | 316.6 | 134.5 | 154.0 | 130.5 |
+| uniform, random | 482.1 | 452.8 | 403.7 | 316.7 |
+| uniform, appended | 581.7 | 70.0 | 47.9 | 38.1 |
+| uniform, spread | 416.8 | 467.9 | 468.0 | 474.6 |
+| skewed, increasing | 307.0 | 132.6 | 146.3 | 140.4 |
+| skewed, random | 408.1 | 434.2 | 384.2 | 385.8 |
+| skewed, appended | 456.0 | 72.2 | 50.5 | 39.2 |
+| skewed, spread | 1,228.5 | 203.1 | 157.4 | 149.6 |
 
-Random inserts are where the gapped array comes closest, within about
-25% of tlx's fastest setting here; on the 10M real datasets it was
-between 30% faster and 2% slower. Appends are its worst case: a B+-tree
-only touches its last leaf, while the gapped array keeps shifting keys
-at its end and refreshing its last segment. That matters for a
-database, since auto-increment primary keys are common.
+Random inserts are where the gapped array comes closest: about even
+with tlx's fastest setting on skewed keys and 1.5x slower on uniform
+ones here, and on the 10M real datasets between 27% faster and 21%
+slower. Appends are its worst case: a B+-tree only touches its last
+leaf, while the gapped array keeps shifting keys at its end and
+refreshing its last segment. That matters for a database, since
+auto-increment primary keys are common.
 
-A later run of just this benchmark (`results/runs/2026-10-25_1145/`)
-added a fourth order, "spread": the same number of new keys, drawn
-evenly from the whole key range instead of from the data.
+The spread order shows the cost described in "Supporting inserts":
 
-| ns per insert, random order (gapped array / tlx, 512-byte nodes) | keys from the data | keys spread evenly | slots re-laid per insert |
+| ns per insert (gapped array / tlx, 512-byte nodes) | keys from the data, random order | keys spread evenly | slots re-laid per insert |
 |---|---|---|---|
-| uniform, 1M | 389 / 292 | 385 / 322 | 49 → 48 |
-| skewed, 1M | 395 / 369 | 1,110 / 157 | 49 → 161 |
-| books, 10M | 570 / 546 | 986 / 572 | 47 → 77 |
-| fb, 10M | 456 / 516 | 1,452 / 201 | 3 → 129 |
-| osm, 10M | 445 / 561 | 1,277 / 289 | 5 → 85 |
-| wiki, 10M | 574 / 579 | 1,070 / 436 | 35 → 71 |
+| uniform, 1M | 482 / 317 | 417 / 475 | 49 → 48 |
+| skewed, 1M | 408 / 386 | 1,229 / 150 | 49 → 161 |
+| books, 10M | 635 / 581 | 1,012 / 577 | 47 → 77 |
+| fb, 10M | 471 / 643 | 1,416 / 207 | 3 → 129 |
+| osm, 10M | 586 / 629 | 1,216 / 306 | 5 → 85 |
+| wiki, 10M | 687 / 570 | 1,077 / 550 | 35 → 71 |
 
-On uniform keys the two are the same thing, and so are the numbers.
-Everywhere else, spreading the inserts makes the gapped array 1.7–3.2x
-slower, while tlx stays the same or gets faster, presumably because the
-new keys land in a few leaves that stay in cache.
+On uniform keys the two orders draw from the same distribution, so the
+differences there are single-pass noise; tlx's 317 vs 475 ns is the
+largest (292 vs 322 in an earlier run). Everywhere else, spreading the inserts makes the gapped array
+1.6–3.0x slower, while tlx stays the same or gets up to 3.1x faster,
+presumably because the new keys land in a few leaves that stay in
+cache.
 
 ### The whole database on each index
 
@@ -588,59 +602,67 @@ costs nothing except in the durable-insert rows.
 
 | ns per operation (learned index / tlx) | 1M uniform | 1M skewed | 10M uniform |
 |---|---|---|---|
-| the store's own lookup | 289 / 452 | 319 / 511 | 746 / 725 |
-| point lookup, parsed ahead of time | 616 / 692 | 589 / 693 | 997 / 1,149 |
-| point lookup, parsed each time | 1,405 / 1,485 | 1,453 / 1,521 | 1,773 / 1,914 |
-| range scan of 100 rows | 10,996 / 10,822 | 10,840 / 10,962 | 11,465 / 11,382 |
-| insert, random order | 2,830 / 2,625 | 2,767 / 2,597 | 3,211 / 3,178 |
-| insert, appended | 3,419 / 1,772 | 3,381 / 1,730 | 5,504 / 1,824 |
-| 95% reads, 5% inserts following the data | 682 / 971 | 706 / 801 | 1,037 / 1,415 |
-| 50% reads, 50% inserts spread evenly | 1,781 / 1,416 | 2,392 / 1,111 | 1,668 / 1,813 |
-| durable insert, fsync every write | 1,671,686 / 1,665,430 | 1,346,549 / 1,390,628 | 1,478,835 / 1,869,390 |
-| durable insert, fsync every 64 writes | 38,165 / 30,454 | 27,572 / 31,271 | 32,200 / 30,768 |
-| opening the database from a snapshot | 140 ms / 217 ms | 139 ms / 221 ms | 1,727 ms / 2,420 ms |
+| the store's own lookup | 356 / 616 | 420 / 552 | 718 / 1,053 |
+| point lookup, parsed ahead of time | 628 / 684 | 636 / 666 | 1,181 / 1,247 |
+| point lookup, parsed each time | 1,470 / 1,562 | 1,516 / 1,646 | 1,839 / 1,988 |
+| range scan of 100 rows | 11,026 / 10,595 | 10,892 / 11,098 | 11,440 / 11,245 |
+| insert, random order | 2,771 / 2,680 | 2,853 / 2,733 | 3,185 / 3,269 |
+| insert, appended | 3,439 / 1,718 | 3,414 / 1,792 | 6,073 / 1,776 |
+| 95% reads, 5% inserts following the data | 694 / 905 | 764 / 875 | 1,207 / 1,706 |
+| 50% reads, 50% inserts spread evenly | 1,823 / 1,479 | 2,255 / 1,230 | 1,610 / 2,055 |
+| durable insert, fsync every write | 1,691,744 / 1,770,899 | 2,096,617 / 2,073,707 | 1,788,743 / 2,580,519 |
+| durable insert, fsync every 64 writes | 29,913 / 32,169 | 37,631 / 40,064 | 32,338 / 34,150 |
+| opening the database from a snapshot | 141 ms / 220 ms | 145 ms / 221 ms | 1,742 ms / 2,487 ms |
 | memory per row, opened from a snapshot | 89.2 / 94.3 bytes | 89.2 / 94.3 bytes | 89.2 / 94.3 bytes |
 
-The store's own lookup is 1.6x faster on the learned index at 1M keys,
-about the same as on its own. (At 10M the two came out even here,
-while the full query was 13% faster on the learned index; I don't have
-an explanation for that.) By the time the executor has planned the
+The store's own lookup, timed in a loop of its own, is 1.3–1.7x faster
+on the learned index, about what the index alone shows at 1M keys. (At
+10M it came out 1.47x, more than the index alone; in the earlier run it
+was the other way round.) By the time the executor has planned the
 query and turned the stored bytes back into a row, the difference is
-11–15%, and once the statement has to be parsed it's 4–7%. Range scans
-are even, since decoding a hundred rows costs far more than finding the
-first one. Random inserts are even too, and appends are 2–3x slower on
-the learned index, as in the storage-level benchmark.
+5–9%, and once the statement has to be parsed it's 6–9%. That isn't
+just the same saving spread over a longer query: on 1M uniform keys the
+store's own lookups differ by 261 ns, but the pre-parsed queries by
+only 56 ns. So timing lookups in a tight loop overstates what they save
+inside a query, and I haven't worked out why. Range scans of 100 and
+1,000 rows are even, since decoding the rows costs far more than finding
+the first one, and scans of 10 rows are 2–13% faster on the learned
+index. Random inserts are even too, and appends are 1.9–3.4x slower
+on the learned index, as in the storage-level benchmark.
 
 The mixed workloads show both sides of the learned index. With inserts
-that follow the existing data, a read-heavy mix is 12–30% faster,
+that follow the existing data, a read-heavy mix is 15–41% faster,
 probably because tlx's lookups slow down as its leaves split (the
-storage-level benchmark shows that happening). With
-inserts spread evenly over the key range, which for skewed data means
-landing mostly where the table has few keys, the learned index is 2.2x
-slower on skewed data and up to 3.4x slower on the real datasets (fb),
-for the reason described in "Supporting inserts".
+storage-level benchmark shows that happening). With inserts spread
+evenly over the key range, which for skewed data means landing mostly
+where the table has few keys, the learned index is 1.8x slower on
+skewed data and up to 2.9x slower on the real datasets (fb), for the
+reason described in "Supporting inserts".
 
-A durable insert takes about 1.3–1.9 ms on either index, because the
-fsync is nearly all of it. Syncing every 64 writes brings that down to
-about 30 µs, still about ten times what the same insert costs without
-any fsync, and the two indexes stay within the noise of each other. So
-for durable writes, the index doesn't matter. Opening a database from a
-snapshot is 30–37% faster on the learned index, probably because laying
-out a sorted array is cheaper than building a tree (my B+-tree wrapper
-also makes a second pass to move the rows in), and memory per row is
-about the same (89 vs 94 bytes; most of a row is the row itself).
+A durable insert takes about 1.7–2.6 ms on either index, because the
+fsync is nearly all of it, and separate runs of the same build ranged
+from 1.4 to 2.6 ms. Syncing
+every 64 writes brings that down to about 30–40 µs, still about ten
+times what the same insert costs without any fsync, and the two indexes
+stay within the noise of each other. So for durable writes, the index
+doesn't matter. Opening a database from a snapshot is 1.4–1.6x faster
+on the learned index, probably because laying out a sorted array is
+cheaper than building a tree (my B+-tree wrapper also makes a second
+pass to move the rows in), and memory per row is about the same (89 vs
+94 bytes; most of a row is the row itself).
 
 On the four real datasets (one run of each build, so noisier), a parsed
-point lookup was between 8% faster and 1% slower on the learned index,
-appends were about 3x slower, and inserts spread evenly over the key
-range were up to 3.4x slower. The full tables are in
-`results/runs/2026-10-25_1112/engine_summary.md`.
+point lookup was between 8% faster and 10% slower on the learned index,
+appends were 3.2–3.6x slower, and inserts spread evenly over the key
+range were up to 2.9x slower. The full tables, with the lowest and
+highest of the three runs for the synthetic data, are in
+`results/runs/2026-10-26_1522/engine_summary.md`.
 
 ### Durability
 
-A durable write in the storage-engine demo takes about 1.39 ms here,
-against about 0.85 µs for the same insert with no log, and nearly all of
-that is `fsync`. The ratio (about 1,630x) says more about the disk than
+A durable write in the storage-engine demo takes about 2.0 ms here,
+against about 0.83 µs for the same insert with no log, and nearly all of
+that is `fsync`. The ratio (about 2,400x) says more about the disk than
 the database: on the machine I started this project on, an fsync took
 about 113 µs, and the same code came out at 36x.
 
@@ -657,18 +679,20 @@ compares each run to the normal spread-out case from the same round.
 
 | scenario | refreshes | full rebuilds | ns per insert | slowdown |
 |---|---|---|---|---|
-| spread out (normal) | 1,368 | 0 | 412.6 | — |
-| 5.0% window | 1,336 | 0 | 658.2 | +57% |
-| 2.0% window | 1,314 | 0 | 660.4 | +63% |
-| 1.2% window | 1,265 | 0 | 706.3 | +72% |
+| spread out (normal) | 1,368 | 0 | 418.8 | — |
+| 5.0% window | 1,336 | 0 | 641.0 | +57% |
+| 2.0% window | 1,314 | 0 | 664.1 | +62% |
+| 1.2% window | 1,265 | 0 | 670.1 | +53% |
 
-Concentrating the inserts makes them 55–75% slower, but there are still
+The slowdown column is the median of the nine per-round comparisons,
+which is why it doesn't quite match the ratio of the medians.
+Concentrating the inserts makes them 50–65% slower, but there are still
 no full rebuilds: the crowded region borrows room from its neighbors
 instead. Before the insert changes described in the bugs section, this
 same test showed slowdowns of at most 12%. That wasn't resistance. Every
 insert was paying for a full rebuild of the array every 512 inserts,
 which swamped everything else. A concentrated insert now costs about
-660–710 ns, against more than 20,000 ns for any insert back then.
+640–670 ns, against more than 20,000 ns for any insert back then.
 
 This is the simplest version of the attack. One study that poisoned the
 data ALEX and PGM-index were built on measured slowdowns of up to 20%
@@ -782,7 +806,7 @@ last region every few hundred inserts. Those got the windowed refresh and
 the growing last segment. And on perfectly regular keys, a single segment
 could cover the whole array, so refreshing it was a full rebuild in
 disguise; that's what the 4,096-key cap is for. After all four, inserts
-take 300–600 ns at 1M keys and 320–670 ns at 10M, with no full rebuilds
+that follow the data take 300–600 ns at 1M keys and 320–670 ns at 10M, with no full rebuilds
 in any of the benchmarks.
 
 The tests had a story of their own. I wrote a test that checks the 2 ×

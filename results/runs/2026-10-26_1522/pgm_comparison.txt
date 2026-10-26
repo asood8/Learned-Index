@@ -1,0 +1,12 @@
+== uniform (1000000 keys, eps=64) ==
+  correctness  -- ours (pinned): pass   ours (optimal): pass   PGM-index: pass   PGM (no recursion): pass
+  latency      -- ours (pinned):    90.6   ours (optimal):    87.3   PGM-index:    93.2   PGM (no recursion):   106.4  ns/lookup
+  segments     -- ours (pinned):      79   ours (optimal):      57   PGM-index:      57
+  memory       -- ours (pinned):    1896   ours (optimal):    1368   PGM-index:     984  bytes
+
+== skewed (1000000 keys, eps=64) ==
+  correctness  -- ours (pinned): pass   ours (optimal): pass   PGM-index: pass   PGM (no recursion): pass
+  latency      -- ours (pinned):   100.4   ours (optimal):    97.7   PGM-index:   123.0   PGM (no recursion):   122.5  ns/lookup
+  segments     -- ours (pinned):     157   ours (optimal):     126   PGM-index:     126
+  memory       -- ours (pinned):    3768   ours (optimal):    3024   PGM-index:    2192  bytes
+

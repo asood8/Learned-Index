@@ -1,0 +1,86 @@
+  PASS  CREATE TABLE users
+inserted 1000 rows
+
+  PASS  WHERE id = 42 uses a point lookup
+  PASS  point lookup returns the exact correct row
+  PASS  WHERE id BETWEEN uses a range scan
+  PASS  range scan returns exactly 11 rows (100..110 inclusive)
+  PASS  range scan rows are the correct ids, in sorted order
+  PASS  WHERE on a non-key column uses a filtered full scan
+  PASS  filtered scan returns the correct row count
+  PASS  every returned row actually has age = 30
+  PASS  no WHERE uses a full scan
+    (full scan returned 1000 rows, expected 1000)
+  PASS  full scan returns all 1000 rows
+  PASS  querying a nonexistent table fails
+  PASS  wrong column count fails
+  PASS  non-INT primary key fails
+  PASS  EXPLAIN point lookup succeeds
+  PASS  EXPLAIN mentions point lookup
+  PASS  EXPLAIN reports a predicted position
+  PASS  EXPLAIN reports the key was found
+  PASS  EXPLAIN correctly reports a missing key as not found
+  PASS  EXPLAIN range scan reports the correct row count
+  PASS  EXPLAIN on a non-key column reports a full table scan
+  PASS  EXPLAIN on a non-SELECT statement is rejected
+  PASS  UPDATE by primary key affects exactly 1 row
+  PASS  UPDATE actually changed the value
+  PASS  UPDATE via full scan affects the correct row count
+  PASS  sanity: row 500 exists before the PK update
+  PASS  UPDATE reassigning the primary key succeeds
+  PASS  old primary key is gone after being reassigned
+  PASS  row is findable under its new primary key
+  PASS  DELETE by primary key affects exactly 1 row
+  PASS  deleted row is genuinely gone
+  PASS  full scan reflects the deletion (999 rows remain)
+  PASS  DELETE via full scan affects the correct row count
+  PASS  setup: delete row 2 before restart check
+  PASS  a deletion survives a full restart, not just the current session
+  PASS  an UPDATE's new primary key also survives a restart
+  PASS  ORDER BY doesn't change the row count
+  PASS  ORDER BY age DESC actually sorts descending
+  PASS  ORDER BY on a TEXT column sorts correctly
+  PASS  LIMIT truncates to the requested count
+  PASS  LIMIT larger than the result set doesn't pad or crash
+  PASS  ORDER BY + LIMIT together: correct final count
+  PASS  ORDER BY + LIMIT together: LIMIT applies after sorting, not before
+  PASS  COUNT(*) returns a single summary row
+  PASS  COUNT(*) matches the actual row count
+  PASS  COUNT(*) respects a WHERE clause
+  PASS  SUM(column) computes the correct total
+  PASS  SUM on a TEXT column is rejected
+  PASS  LIMIT applies to COUNT(*)'s result row, not to the rows being counted
+  PASS  COUNT(*) ... LIMIT 0 returns no rows
+  PASS  CREATE INDEX on an existing table succeeds (backfill)
+  PASS  creating a duplicate-named index is rejected
+  PASS  secondary index on a TEXT column is rejected
+  PASS  WHERE on an indexed column uses the index now
+  PASS  index lookup returns the correct row count
+    (debug: index lookup returned 20 rows, full-scan-derived expected 20)
+  PASS  every row from the index lookup actually has age = 45
+  PASS  a new INSERT is immediately visible via the secondary index
+  PASS  UPDATE removes the stale entry from the secondary index
+  PASS  UPDATE adds the correct new entry to the secondary index
+  PASS  DELETE removes the entry from the secondary index too
+  PASS  INSERT over an existing primary key replaces its secondary index entry
+  PASS  UPDATE onto another row's primary key removes that row's index entries
+  PASS  a TEXT value for an INT column is rejected
+  PASS  a negative primary key is rejected
+  PASS  an indexed value of 2^20 or more is rejected
+  PASS  a primary key over 28 bits is rejected on a table with an index
+  PASS  UPDATE with the wrong type is rejected
+  PASS  WHERE comparing an INT column with TEXT is rejected
+  PASS  WHERE on a column that doesn't exist is an error, not zero rows
+  PASS  a table whose first column isn't INT is rejected
+  PASS  duplicate column names are rejected
+  PASS  BETWEEN with a negative lower bound still finds the rows above it
+  PASS  an out-of-range value in WHERE on an indexed column matches nothing
+  PASS  a primary key over 28 bits is fine on a table without an index
+  PASS  CREATE INDEX then refuses that table instead of masking the key
+  PASS  the secondary index itself survives a restart
+  PASS  after a checkpoint, every row comes back from the snapshot
+  PASS  after a checkpoint, the catalog and its index come back too
+    (indexed lookup: 6956 ns, full scan: 155472 ns, speedup: 22.3x)
+  PASS  the secondary index is actually faster than a full scan, not just correct
+
+79/79 tests passed
