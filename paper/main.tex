@@ -8,7 +8,8 @@
 \begin{document}
 
 \title{Learned Index or B+-Tree?\\
-An End-to-End Comparison in an Embedded SQL Engine}
+An End-to-End Comparison\\
+in an Embedded SQL Engine}
 
 \author{\IEEEauthorblockN{Aadit Sood}}
 
@@ -17,12 +18,12 @@ An End-to-End Comparison in an Embedded SQL Engine}
 \begin{abstract}
 Learned indexes answer point lookups faster than B-trees when measured on
 their own, but a database also has to parse and plan each statement, log each
-write, and turn index entries back into rows. We built a small embedded SQL engine whose
-storage engine is a learned index (piecewise-linear segments over a
-gapped array, with packed-memory-array rebalancing), and made the index
-swappable at compile time for a well-known B+-tree library with nothing
-else changed, write-ahead log and crash recovery included, and measured
-both builds on two machines. On its own, the learned index is 1.5--1.9x
+write, and turn index entries back into rows. We built a small embedded SQL
+engine, with a write-ahead log and crash recovery, whose storage engine is a
+learned index (piecewise-linear segments over a gapped array, with
+packed-memory-array rebalancing). The index can be swapped at compile time for a
+well-known B+-tree library with nothing else changed, and we measured both builds
+on two machines. On its own, the learned index is 1.5--1.9x
 faster than the B+-tree at 1M keys, 1.3--1.5x at 10M, and 1.1--1.5x on four
 real datasets. Inside the engine the advantage shrinks to 1.06--1.20x for a
 query that was parsed ahead of time and to about even (0.99--1.06x) for one
@@ -343,8 +344,8 @@ After the remaining 10\% of the keys are inserted, the learned index is
 and split, while the gapped array had room set aside. The learned model
 takes 0.006--0.07 bytes per key, against 0.25 for tlx's inner nodes (0.53
 with its default 256-byte nodes), but the gapped array as a whole takes
-11.4--11.5 bytes per key, against 8.6 for the packed tlx tree, because a
-third of its slots are empty. Against the published PGM-index on 1M
+11.4--11.5 bytes per key, against 8.6 for the packed tlx tree, because about
+30\% of its slots are empty. Against the published PGM-index on 1M
 keys~\cite{ferragina2020}, the pinned segmentation over a dense array, without
 the gapped array's empty slots or its cap on segment length, took 89.4 and
 92.8~ns on uniform and skewed data on the laptop, and the PGM-index 92.9 and
@@ -457,7 +458,8 @@ wiki 10M & 569 / 513 & 898 / 402 & 504 / 456 & 830 / 384 & 35 $\to$ 71 \\
 \end{tabular}
 \end{table*}
 
-On uniform keys the two kinds of insert draw from the same distribution,
+In Table~\ref{tab:spread}, on uniform keys the two kinds of insert draw from the
+same distribution,
 and the times match on both machines. Everywhere else, spreading the inserts
 makes the gapped array 1.6--3.4x slower, raises the slots it rewrites per insert
 by up to 43 times, and forces refreshes that borrow from neighboring segments
