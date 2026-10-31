@@ -2,6 +2,9 @@
 
 [![tests](https://github.com/asood8/Learned-Index/actions/workflows/tests.yml/badge.svg)](https://github.com/asood8/Learned-Index/actions/workflows/tests.yml)
 
+[Read the paper (PDF)](paper/learned_index.pdf). It's my own write-up of the
+project and hasn't been peer reviewed.
+
 This is an embedded SQL database written in C++17. The storage engine is
 a learned index instead of a B-tree. To find a key, it uses a small
 model, made of a few straight lines, to guess where the key is in a

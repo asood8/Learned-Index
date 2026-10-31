@@ -8,7 +8,8 @@ pdflatex main && bibtex main && pdflatex main && pdflatex main
 ```
 
 or upload both files to Overleaf, which has the `IEEEtran` class built
-in.
+in. `learned_index.pdf` is the compiled copy, so rebuild it whenever
+`main.tex` changes.
 
 Its results come from two benchmark runs, one per machine, in
 `results/runs/2026-10-31_0201/` (laptop) and
