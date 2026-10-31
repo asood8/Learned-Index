@@ -1,0 +1,22 @@
+== learned index, data/sosd_books_10000000.bin: 9000430 rows loaded, 999570 held out for inserts ==
+  load, random order (ns/row)                        4026.5 ns
+  memory after the load (bytes/row)                    86.3 B
+  open from the log (ms)                             6077.5 ms
+  open from a snapshot (ms)                          1461.6 ms
+  memory after opening the snapshot (bytes/row)         89.2 B
+  point lookup, parsed ahead of time (ns)             733.7 ns
+  point lookup for a missing id (ns)                  318.0 ns
+  point lookup, parsed each time (ns)                1480.4 ns
+    of which the store's own lookup (ns)              370.9 ns
+  range scan of 10 rows (ns)                         1625.4 ns
+  range scan of 100 rows (ns)                        9855.5 ns
+  range scan of 1000 rows (ns)                      83153.7 ns
+  insert, random order (ns)                          3830.1 ns
+  insert, appended past the end (ns)                 6313.6 ns
+  95% reads, 5% inserts following the data (ns/op)        892.9 ns
+  50% reads, 50% inserts following the data (ns/op)       1948.6 ns
+  50% reads, 50% inserts spread evenly (ns/op)       1889.2 ns
+  durable insert, fsync every 1 (ns)              2685346.9 ns
+  durable insert, fsync every 8 (ns)               342208.5 ns
+  durable insert, fsync every 64 (ns)               47208.0 ns
+  durable insert, fsync every 512 (ns)               9145.0 ns

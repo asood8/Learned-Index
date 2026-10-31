@@ -1,0 +1,10 @@
+== data/skewed_1000000.bin (1000000 keys) ==
+learned model: position ~= 0.00000002 * key + 490687.1592  (max_error = 15684303)
+segmented model: 151 segments (eps = 64) vs 1 segment for Phase 1
+correctness check passed (2000 keys), tree holds 1000000 entries
+binary search:       177.3 ns/lookup
+B+-tree:             302.5 ns/lookup
+learned index:       194.0 ns/lookup
+segmented index:      93.0 ns/lookup
+(median of 7 interleaved passes)
+

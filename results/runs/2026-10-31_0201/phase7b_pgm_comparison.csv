@@ -1,0 +1,9 @@
+dataset,n,structure,ns_per_lookup,memory_bytes,segments
+uniform,1000000,ours,89.4229,1896,79
+uniform,1000000,ours_optimal,85.9482,1368,57
+uniform,1000000,pgm_index,92.8799,984,57
+uniform,1000000,pgm_index_norecursive,105.468,,
+skewed,1000000,ours,92.8226,3768,157
+skewed,1000000,ours_optimal,90.0741,3024,126
+skewed,1000000,pgm_index,112.087,2192,126
+skewed,1000000,pgm_index_norecursive,114.58,,

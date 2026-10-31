@@ -1,0 +1,26 @@
+== data/sosd_osm_10000000.bin: 9000430 keys built, 999570 held out ==
+200000 random hits and 200000 misses, median of 7 interleaved passes, ns/lookup
+
+freshly built                            hits     misses
+binary search                           313.4      312.7
+B+-tree (bplus_tree.h)                  480.2      462.3
+tlx B+-tree (256-byte nodes)            364.2      357.5
+tlx B+-tree (512-byte nodes)            336.0      327.0
+Phase 2 model, dense array              237.5      232.6
+gapped array (what the db uses)         303.0      301.1
+
+memory, bytes per key               whole thing   routing only
+binary search                              8.00         0.0000   just the keys
+B+-tree (bplus_tree.h)                    37.35         1.6013   also stores an 8-byte value per key
+tlx B+-tree (256-byte nodes)               9.28         0.5313   leaves full (bulk-loaded)
+tlx B+-tree (512-byte nodes)               8.63         0.2541   leaves full (bulk-loaded)
+Phase 2 model, dense array                 8.05         0.0511   read-only; no room for inserts
+gapped array (what the db uses)           11.50         0.0723   keys + empty slots + segments
+
+after inserting the 999570 held-out keys (3789 local + 0 full rebalances)
+binary search (rebuilt array)           323.7
+B+-tree (bplus_tree.h)                  476.0
+tlx B+-tree (256-byte nodes)            463.9
+tlx B+-tree (512-byte nodes)            374.0
+Phase 2 model (rebuilt)                 240.3
+gapped array (what the db uses)         316.1

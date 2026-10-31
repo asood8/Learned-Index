@@ -1,0 +1,37 @@
+Does the 10M lookup speedup move between processes on the laptop?
+
+Same machine and commit as results/runs/2026-10-31_0201 (i7-13620H, WSL2,
+ab67357, nothing else running), right after that run. Each line is one
+separate process of
+
+    ./build/benchmark_db_lookups data/uniform_10000000.bin 3
+
+"thp off" means the process was started with prctl(PR_SET_THP_DISABLE, 1),
+which is inherited across exec. The system setting is "always [madvise]
+never", and this program doesn't call madvise, so huge pages shouldn't be
+in use either way. Times are ns per hit, fresh, median of 3 passes.
+
+First batch (order: on, off, on, off, ...)
+  thp on : binary  464.8  tlx512  422.7  gapped  369.6  tlx/gapped 1.14
+  thp off: binary  412.4  tlx512  397.5  gapped  290.4  tlx/gapped 1.37
+  thp on : binary  410.7  tlx512  404.3  gapped  346.0  tlx/gapped 1.17
+  thp off: binary  501.2  tlx512  391.3  gapped  292.7  tlx/gapped 1.34
+  thp on : binary  506.7  tlx512  407.9  gapped  363.4  tlx/gapped 1.12
+  thp off: binary  507.2  tlx512  394.1  gapped  292.7  tlx/gapped 1.35
+
+Second batch (balanced order, because the first always ran "on" first)
+  thp off: binary  604.4  tlx512  384.9  gapped  285.5  tlx/gapped 1.35
+  thp on : binary  425.0  tlx512  400.7  gapped  357.9  tlx/gapped 1.12
+  thp on : binary  456.9  tlx512  488.3  gapped  343.9  tlx/gapped 1.42
+  thp off: binary  413.4  tlx512  427.5  gapped  290.5  tlx/gapped 1.47
+  thp off: binary  595.9  tlx512  452.2  gapped  375.4  tlx/gapped 1.20
+  thp on : binary  524.5  tlx512  404.2  gapped  300.9  tlx/gapped 1.34
+  thp on : binary  446.8  tlx512  387.6  gapped  349.7  tlx/gapped 1.11
+  thp off: binary  453.0  tlx512  388.6  gapped  290.3  tlx/gapped 1.34
+
+What this shows: the speedup ranges from 1.11 to 1.47 between processes, in
+two clusters (1.11-1.20 and 1.34-1.47), mostly because the gapped array is
+either about 290 or about 350 ns. Both clusters appear with huge pages on and
+off, so huge pages aren't the explanation. The cause isn't established. A
+benchmark that interleaves passes inside one process can't see this, since it
+draws one sample from the clusters. Not tested on the AWS machine.

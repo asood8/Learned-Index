@@ -1,0 +1,22 @@
+== learned index, data/sosd_wiki_10000000.bin: 8998243 rows loaded, 999340 held out for inserts ==
+  load, random order (ns/row)                        2909.2 ns
+  memory after the load (bytes/row)                    83.5 B
+  open from the log (ms)                             6608.7 ms
+  open from a snapshot (ms)                          1617.5 ms
+  memory after opening the snapshot (bytes/row)         89.2 B
+  point lookup, parsed ahead of time (ns)             942.6 ns
+  point lookup for a missing id (ns)                  445.9 ns
+  point lookup, parsed each time (ns)                1721.2 ns
+    of which the store's own lookup (ns)              469.8 ns
+  range scan of 10 rows (ns)                         1592.2 ns
+  range scan of 100 rows (ns)                       10801.1 ns
+  range scan of 1000 rows (ns)                      88307.7 ns
+  insert, random order (ns)                          2771.9 ns
+  insert, appended past the end (ns)                 5432.7 ns
+  95% reads, 5% inserts following the data (ns/op)       1249.9 ns
+  50% reads, 50% inserts following the data (ns/op)       1493.8 ns
+  50% reads, 50% inserts spread evenly (ns/op)       2902.8 ns
+  durable insert, fsync every 1 (ns)              2593018.0 ns
+  durable insert, fsync every 8 (ns)               251398.5 ns
+  durable insert, fsync every 64 (ns)               43246.1 ns
+  durable insert, fsync every 512 (ns)               8131.0 ns

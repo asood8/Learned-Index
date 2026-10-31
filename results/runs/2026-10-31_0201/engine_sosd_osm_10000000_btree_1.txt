@@ -1,0 +1,22 @@
+== B+-tree (tlx), data/sosd_osm_10000000.bin: 9000430 rows loaded, 999570 held out for inserts (keys shifted right 15 bits to fit 48) ==
+  load, random order (ns/row)                        2997.2 ns
+  memory after the load (bytes/row)                   115.2 B
+  open from the log (ms)                             9909.4 ms
+  open from a snapshot (ms)                          2424.7 ms
+  memory after opening the snapshot (bytes/row)         94.3 B
+  point lookup, parsed ahead of time (ns)            1055.2 ns
+  point lookup for a missing id (ns)                  846.1 ns
+  point lookup, parsed each time (ns)                1631.1 ns
+    of which the store's own lookup (ns)              675.8 ns
+  range scan of 10 rows (ns)                         1557.5 ns
+  range scan of 100 rows (ns)                       10865.6 ns
+  range scan of 1000 rows (ns)                      88888.3 ns
+  insert, random order (ns)                          2920.1 ns
+  insert, appended past the end (ns)                 1705.7 ns
+  95% reads, 5% inserts following the data (ns/op)       1364.4 ns
+  50% reads, 50% inserts following the data (ns/op)       1667.8 ns
+  50% reads, 50% inserts spread evenly (ns/op)       1415.2 ns
+  durable insert, fsync every 1 (ns)              2301676.1 ns
+  durable insert, fsync every 8 (ns)               324213.2 ns
+  durable insert, fsync every 64 (ns)               33330.1 ns
+  durable insert, fsync every 512 (ns)               5242.2 ns

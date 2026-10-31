@@ -1,0 +1,22 @@
+== learned index, data/sosd_osm_10000000.bin: 9000430 rows loaded, 999570 held out for inserts (keys shifted right 15 bits to fit 48) ==
+  load, random order (ns/row)                        2729.5 ns
+  memory after the load (bytes/row)                    84.1 B
+  open from the log (ms)                             6647.5 ms
+  open from a snapshot (ms)                          1603.5 ms
+  memory after opening the snapshot (bytes/row)         89.3 B
+  point lookup, parsed ahead of time (ns)            1030.0 ns
+  point lookup for a missing id (ns)                  494.5 ns
+  point lookup, parsed each time (ns)                1809.7 ns
+    of which the store's own lookup (ns)              500.5 ns
+  range scan of 10 rows (ns)                         1701.4 ns
+  range scan of 100 rows (ns)                       10710.7 ns
+  range scan of 1000 rows (ns)                      88482.0 ns
+  insert, random order (ns)                          2477.3 ns
+  insert, appended past the end (ns)                 5756.9 ns
+  95% reads, 5% inserts following the data (ns/op)       1116.6 ns
+  50% reads, 50% inserts following the data (ns/op)       1391.1 ns
+  50% reads, 50% inserts spread evenly (ns/op)       2197.0 ns
+  durable insert, fsync every 1 (ns)              2255405.9 ns
+  durable insert, fsync every 8 (ns)               220131.7 ns
+  durable insert, fsync every 64 (ns)               41268.8 ns
+  durable insert, fsync every 512 (ns)               7950.7 ns

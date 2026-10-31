@@ -1,0 +1,8 @@
+== data/sosd_books_10000000.bin (10000000 keys) ==
+order       gapped array      B+-tree    tlx 256 B    tlx 512 B   gapped array refreshes
+sorted             347.7        129.3        170.6        156.4   12967 (0 widened), 0 full rebuilds; 43 slots re-laid per insert; 77.8% full afterwards
+shuffled           545.1        745.6        670.9        517.7   13599 (0 widened), 0 full rebuilds; 47 slots re-laid per insert; 77.8% full afterwards
+append             556.6         74.6         54.1         41.7   15828 (0 widened), 0 full rebuilds; 51 slots re-laid per insert; 70.6% full afterwards
+spread             933.9        677.2        561.9        460.5   10272 (30 widened), 0 full rebuilds; 77 slots re-laid per insert; 77.7% full afterwards
+
+plain sorted vector, for context: 7395351.2 ns/insert (a 500-insert sample, O(n) each)

@@ -1,0 +1,7 @@
+base: 900000 keys, inserting 100000 more in each scenario, 9 reps
+
+scenario              median ns/ins           (min - max)   local   full degradation (min..max)
+benign (scattered)            374.3      369.4 -    428.6    1368      0                    --
+5.0% window                   593.4      584.5 -    656.7    1336      0    +56.9% (+53.2..+63.6)
+2.0% window                   612.1      605.5 -    685.6    1314      0    +63.5% (+42.7..+83.2)
+1.2% window                   642.5      636.5 -    702.1    1265      0    +70.9% (+50.3..+85.0)

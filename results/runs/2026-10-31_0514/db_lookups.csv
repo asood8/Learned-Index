@@ -1,0 +1,97 @@
+path,when,structure,hit_ns,miss_ns
+data/uniform_1000000.bin,fresh,binary search,132.269,131.763
+data/uniform_1000000.bin,fresh,B+-tree (bplus_tree.h),232.129,212.677
+data/uniform_1000000.bin,fresh,tlx B+-tree (256-byte nodes),162.536,155.202
+data/uniform_1000000.bin,fresh,tlx B+-tree (512-byte nodes),145.622,143.503
+data/uniform_1000000.bin,fresh,"Phase 2 model, dense array",76.4075,75.7903
+data/uniform_1000000.bin,fresh,gapped array (what the db uses),78.392,79.2595
+data/uniform_1000000.bin,after_inserts,binary search (rebuilt array),135.592,
+data/uniform_1000000.bin,after_inserts,B+-tree (bplus_tree.h),236.978,
+data/uniform_1000000.bin,after_inserts,tlx B+-tree (256-byte nodes),226.827,
+data/uniform_1000000.bin,after_inserts,tlx B+-tree (512-byte nodes),177.996,
+data/uniform_1000000.bin,after_inserts,Phase 2 model (rebuilt),81.5845,
+data/uniform_1000000.bin,after_inserts,gapped array (what the db uses),88.7156,
+data/skewed_1000000.bin,fresh,binary search,135.591,134.31
+data/skewed_1000000.bin,fresh,B+-tree (bplus_tree.h),228.825,217.496
+data/skewed_1000000.bin,fresh,tlx B+-tree (256-byte nodes),158.84,151.276
+data/skewed_1000000.bin,fresh,tlx B+-tree (512-byte nodes),147.26,142.286
+data/skewed_1000000.bin,fresh,"Phase 2 model, dense array",82.282,79.819
+data/skewed_1000000.bin,fresh,gapped array (what the db uses),84.7132,82.5175
+data/skewed_1000000.bin,after_inserts,binary search (rebuilt array),135.15,
+data/skewed_1000000.bin,after_inserts,B+-tree (bplus_tree.h),241.995,
+data/skewed_1000000.bin,after_inserts,tlx B+-tree (256-byte nodes),227.37,
+data/skewed_1000000.bin,after_inserts,tlx B+-tree (512-byte nodes),177.782,
+data/skewed_1000000.bin,after_inserts,Phase 2 model (rebuilt),85.4136,
+data/skewed_1000000.bin,after_inserts,gapped array (what the db uses),92.1379,
+data/uniform_10000000.bin,fresh,binary search,312.571,312.418
+data/uniform_10000000.bin,fresh,B+-tree (bplus_tree.h),477.334,456.985
+data/uniform_10000000.bin,fresh,tlx B+-tree (256-byte nodes),383.11,368.935
+data/uniform_10000000.bin,fresh,tlx B+-tree (512-byte nodes),343.584,332.64
+data/uniform_10000000.bin,fresh,"Phase 2 model, dense array",177.208,173.3
+data/uniform_10000000.bin,fresh,gapped array (what the db uses),234.122,231.672
+data/uniform_10000000.bin,after_inserts,binary search (rebuilt array),319.012,
+data/uniform_10000000.bin,after_inserts,B+-tree (bplus_tree.h),480.876,
+data/uniform_10000000.bin,after_inserts,tlx B+-tree (256-byte nodes),468.6,
+data/uniform_10000000.bin,after_inserts,tlx B+-tree (512-byte nodes),375.363,
+data/uniform_10000000.bin,after_inserts,Phase 2 model (rebuilt),178.266,
+data/uniform_10000000.bin,after_inserts,gapped array (what the db uses),251.963,
+data/skewed_10000000.bin,fresh,binary search,311.686,308.083
+data/skewed_10000000.bin,fresh,B+-tree (bplus_tree.h),485.151,466.844
+data/skewed_10000000.bin,fresh,tlx B+-tree (256-byte nodes),377.879,370.609
+data/skewed_10000000.bin,fresh,tlx B+-tree (512-byte nodes),338.191,329.165
+data/skewed_10000000.bin,fresh,"Phase 2 model, dense array",177.255,174.81
+data/skewed_10000000.bin,fresh,gapped array (what the db uses),233.034,231.775
+data/skewed_10000000.bin,after_inserts,binary search (rebuilt array),327.419,
+data/skewed_10000000.bin,after_inserts,B+-tree (bplus_tree.h),486.395,
+data/skewed_10000000.bin,after_inserts,tlx B+-tree (256-byte nodes),470.712,
+data/skewed_10000000.bin,after_inserts,tlx B+-tree (512-byte nodes),374.086,
+data/skewed_10000000.bin,after_inserts,Phase 2 model (rebuilt),180.508,
+data/skewed_10000000.bin,after_inserts,gapped array (what the db uses),252.266,
+data/sosd_books_10000000.bin,fresh,binary search,314.619,314.458
+data/sosd_books_10000000.bin,fresh,B+-tree (bplus_tree.h),477.238,461.664
+data/sosd_books_10000000.bin,fresh,tlx B+-tree (256-byte nodes),381.988,369.264
+data/sosd_books_10000000.bin,fresh,tlx B+-tree (512-byte nodes),337.724,327.931
+data/sosd_books_10000000.bin,fresh,"Phase 2 model, dense array",174.383,171.232
+data/sosd_books_10000000.bin,fresh,gapped array (what the db uses),219.993,218.904
+data/sosd_books_10000000.bin,after_inserts,binary search (rebuilt array),323.377,
+data/sosd_books_10000000.bin,after_inserts,B+-tree (bplus_tree.h),482.891,
+data/sosd_books_10000000.bin,after_inserts,tlx B+-tree (256-byte nodes),470.937,
+data/sosd_books_10000000.bin,after_inserts,tlx B+-tree (512-byte nodes),372.474,
+data/sosd_books_10000000.bin,after_inserts,Phase 2 model (rebuilt),177.059,
+data/sosd_books_10000000.bin,after_inserts,gapped array (what the db uses),243.604,
+data/sosd_fb_10000000.bin,fresh,binary search,304.506,306.01
+data/sosd_fb_10000000.bin,fresh,B+-tree (bplus_tree.h),487.808,475.718
+data/sosd_fb_10000000.bin,fresh,tlx B+-tree (256-byte nodes),380.7,372.114
+data/sosd_fb_10000000.bin,fresh,tlx B+-tree (512-byte nodes),335.735,325.893
+data/sosd_fb_10000000.bin,fresh,"Phase 2 model, dense array",212.287,210.935
+data/sosd_fb_10000000.bin,fresh,gapped array (what the db uses),298.378,295.116
+data/sosd_fb_10000000.bin,after_inserts,binary search (rebuilt array),314.553,
+data/sosd_fb_10000000.bin,after_inserts,B+-tree (bplus_tree.h),487.157,
+data/sosd_fb_10000000.bin,after_inserts,tlx B+-tree (256-byte nodes),468.726,
+data/sosd_fb_10000000.bin,after_inserts,tlx B+-tree (512-byte nodes),373.21,
+data/sosd_fb_10000000.bin,after_inserts,Phase 2 model (rebuilt),225.348,
+data/sosd_fb_10000000.bin,after_inserts,gapped array (what the db uses),312.324,
+data/sosd_osm_10000000.bin,fresh,binary search,313.37,312.742
+data/sosd_osm_10000000.bin,fresh,B+-tree (bplus_tree.h),480.232,462.326
+data/sosd_osm_10000000.bin,fresh,tlx B+-tree (256-byte nodes),364.198,357.547
+data/sosd_osm_10000000.bin,fresh,tlx B+-tree (512-byte nodes),335.998,327.033
+data/sosd_osm_10000000.bin,fresh,"Phase 2 model, dense array",237.48,232.589
+data/sosd_osm_10000000.bin,fresh,gapped array (what the db uses),302.96,301.114
+data/sosd_osm_10000000.bin,after_inserts,binary search (rebuilt array),323.653,
+data/sosd_osm_10000000.bin,after_inserts,B+-tree (bplus_tree.h),475.98,
+data/sosd_osm_10000000.bin,after_inserts,tlx B+-tree (256-byte nodes),463.877,
+data/sosd_osm_10000000.bin,after_inserts,tlx B+-tree (512-byte nodes),373.968,
+data/sosd_osm_10000000.bin,after_inserts,Phase 2 model (rebuilt),240.254,
+data/sosd_osm_10000000.bin,after_inserts,gapped array (what the db uses),316.06,
+data/sosd_wiki_10000000.bin,fresh,binary search,309.976,311.311
+data/sosd_wiki_10000000.bin,fresh,B+-tree (bplus_tree.h),476.356,455.391
+data/sosd_wiki_10000000.bin,fresh,tlx B+-tree (256-byte nodes),368.614,354.765
+data/sosd_wiki_10000000.bin,fresh,tlx B+-tree (512-byte nodes),337.759,326.244
+data/sosd_wiki_10000000.bin,fresh,"Phase 2 model, dense array",211.558,208.407
+data/sosd_wiki_10000000.bin,fresh,gapped array (what the db uses),266.049,263.184
+data/sosd_wiki_10000000.bin,after_inserts,binary search (rebuilt array),327.901,
+data/sosd_wiki_10000000.bin,after_inserts,B+-tree (bplus_tree.h),489.11,
+data/sosd_wiki_10000000.bin,after_inserts,tlx B+-tree (256-byte nodes),461.666,
+data/sosd_wiki_10000000.bin,after_inserts,tlx B+-tree (512-byte nodes),376.074,
+data/sosd_wiki_10000000.bin,after_inserts,Phase 2 model (rebuilt),213.474,
+data/sosd_wiki_10000000.bin,after_inserts,gapped array (what the db uses),275.659,

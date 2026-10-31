@@ -1,0 +1,37 @@
+=== n = 100000 ===
+  uniform   binary_search          104.0 ns/lookup   index:         0 bytes (0.0000 bytes/key)   total: 8.00 bytes/key
+  uniform   bplus_tree             144.0 ns/lookup   index:    157520 bytes (1.5752 bytes/key)   total: 37.32 bytes/key
+  uniform   learned_index           61.3 ns/lookup   index:        24 bytes (0.0002 bytes/key)   total: 8.00 bytes/key
+  uniform   segmented_index         67.1 ns/lookup   index:       248 bytes (0.0025 bytes/key)   total: 8.00 bytes/key
+  uniform   segmented_optimal       63.1 ns/lookup   index:       176 bytes (0.0018 bytes/key)   total: 8.00 bytes/key
+  skewed    binary_search          102.7 ns/lookup   index:         0 bytes (0.0000 bytes/key)   total: 8.00 bytes/key
+  skewed    bplus_tree             144.8 ns/lookup   index:    157520 bytes (1.5752 bytes/key)   total: 37.32 bytes/key
+  skewed    learned_index          115.1 ns/lookup   index:        24 bytes (0.0002 bytes/key)   total: 8.00 bytes/key
+  skewed    segmented_index         72.1 ns/lookup   index:       992 bytes (0.0099 bytes/key)   total: 8.01 bytes/key
+  skewed    segmented_optimal       74.7 ns/lookup   index:       848 bytes (0.0085 bytes/key)   total: 8.01 bytes/key
+
+=== n = 1000000 ===
+  uniform   binary_search          172.7 ns/lookup   index:         0 bytes (0.0000 bytes/key)   total: 8.00 bytes/key
+  uniform   bplus_tree             308.2 ns/lookup   index:   1597928 bytes (1.5979 bytes/key)   total: 37.35 bytes/key
+  uniform   learned_index          111.0 ns/lookup   index:        24 bytes (0.0000 bytes/key)   total: 8.00 bytes/key
+  uniform   segmented_index         89.6 ns/lookup   index:      1928 bytes (0.0019 bytes/key)   total: 8.00 bytes/key
+  uniform   segmented_optimal       85.2 ns/lookup   index:      1400 bytes (0.0014 bytes/key)   total: 8.00 bytes/key
+  skewed    binary_search          173.6 ns/lookup   index:         0 bytes (0.0000 bytes/key)   total: 8.00 bytes/key
+  skewed    bplus_tree             303.6 ns/lookup   index:   1597928 bytes (1.5979 bytes/key)   total: 37.35 bytes/key
+  skewed    learned_index          198.8 ns/lookup   index:        24 bytes (0.0000 bytes/key)   total: 8.00 bytes/key
+  skewed    segmented_index         91.5 ns/lookup   index:      3800 bytes (0.0038 bytes/key)   total: 8.00 bytes/key
+  skewed    segmented_optimal       91.8 ns/lookup   index:      3056 bytes (0.0031 bytes/key)   total: 8.00 bytes/key
+
+=== n = 5000000 ===
+  uniform   binary_search          339.6 ns/lookup   index:         0 bytes (0.0000 bytes/key)   total: 8.00 bytes/key
+  uniform   bplus_tree             520.8 ns/lookup   index:   8004944 bytes (1.6010 bytes/key)   total: 37.35 bytes/key
+  uniform   learned_index          221.5 ns/lookup   index:        24 bytes (0.0000 bytes/key)   total: 8.00 bytes/key
+  uniform   segmented_index        149.5 ns/lookup   index:     10160 bytes (0.0020 bytes/key)   total: 8.00 bytes/key
+  uniform   segmented_optimal      146.3 ns/lookup   index:      7592 bytes (0.0015 bytes/key)   total: 8.00 bytes/key
+  skewed    binary_search          343.2 ns/lookup   index:         0 bytes (0.0000 bytes/key)   total: 8.00 bytes/key
+  skewed    bplus_tree             514.7 ns/lookup   index:   8004944 bytes (1.6010 bytes/key)   total: 37.35 bytes/key
+  skewed    learned_index          374.5 ns/lookup   index:        24 bytes (0.0000 bytes/key)   total: 8.00 bytes/key
+  skewed    segmented_index        158.6 ns/lookup   index:     12584 bytes (0.0025 bytes/key)   total: 8.00 bytes/key
+  skewed    segmented_optimal      151.7 ns/lookup   index:      9728 bytes (0.0019 bytes/key)   total: 8.00 bytes/key
+
+medians of 7 interleaved passes; wrote /mnt/c/Users/aadit/python/database/results/runs/2026-10-31_0201/phase7_sweep.csv

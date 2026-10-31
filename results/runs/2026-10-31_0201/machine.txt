@@ -1,0 +1,9 @@
+date:      2026-10-31T02:01:25-04:00
+commit:    ab67357
+cpu:       13th Gen Intel(R) Core(TM) i7-13620H (16 threads)
+memory:    7.6Gi
+kernel:    Linux 6.18.33.2-microsoft-standard-WSL2
+compiler:  g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0, -O2 -std=c++17
+load:      0.08 0.02 0.01 (1, 5 and 15 minute averages, at the start)
+fsync dir: /home/aadit/learned_index_fsync (ext4)
+load:      1.53 1.16 0.85 (at the end)

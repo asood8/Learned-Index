@@ -1,0 +1,22 @@
+== B+-tree (tlx), data/sosd_fb_10000000.bin: 9000430 rows loaded, 999570 held out for inserts ==
+  load, random order (ns/row)                        3866.7 ns
+  memory after the load (bytes/row)                   115.2 B
+  open from the log (ms)                             8220.8 ms
+  open from a snapshot (ms)                          2199.3 ms
+  memory after opening the snapshot (bytes/row)         94.3 B
+  point lookup, parsed ahead of time (ns)             867.5 ns
+  point lookup for a missing id (ns)                  691.9 ns
+  point lookup, parsed each time (ns)                1580.0 ns
+    of which the store's own lookup (ns)              591.0 ns
+  range scan of 10 rows (ns)                         1666.4 ns
+  range scan of 100 rows (ns)                        9897.3 ns
+  range scan of 1000 rows (ns)                      83537.4 ns
+  insert, random order (ns)                          3992.5 ns
+  insert, appended past the end (ns)                 2742.3 ns
+  95% reads, 5% inserts following the data (ns/op)       1184.0 ns
+  50% reads, 50% inserts following the data (ns/op)       2113.5 ns
+  50% reads, 50% inserts spread evenly (ns/op)       1803.2 ns
+  durable insert, fsync every 1 (ns)              2697418.7 ns
+  durable insert, fsync every 8 (ns)               343106.3 ns
+  durable insert, fsync every 64 (ns)               47054.4 ns
+  durable insert, fsync every 512 (ns)               8717.4 ns
