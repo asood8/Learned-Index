@@ -30,3 +30,4 @@ paper/*.blg
 paper/*.log
 paper/*.out
 paper/*.pdf
+!paper/learned_index.pdf

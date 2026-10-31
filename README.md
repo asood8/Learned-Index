@@ -49,7 +49,7 @@ keys unless it says otherwise.
 | Binary search | 167.7, 167.6 ns | 132.3, 135.6 ns |
 | Speedup over tlx at 10M keys | 1.33–1.35x (moves a lot, see below) | 1.45–1.47x |
 | Speedup over tlx on four real datasets (10M keys) | 1.10–1.39x | 1.11–1.54x |
-| The same lookup through SQL, statement parsed ahead of time, against the same database built on tlx | 1.08–1.20x | 1.06–1.15x |
+| The same lookup through SQL, statement parsed ahead of time, against the same database built on tlx (at its default node size) | 1.08–1.20x | 1.06–1.15x |
 | The same, statement parsed each time | 1.02–1.06x | 0.99–1.02x |
 | Inserts in random order (tlx in brackets) | 375, 408 ns (277, 322) | 336, 347 ns (271, 263) |
 | Inserts in increasing order | 2.0–2.3x slower than tlx | 2.2–2.3x slower than tlx |
@@ -324,7 +324,7 @@ An fsync takes about 2 ms on this laptop, far more than anything else
 a write does, so the log can also fsync only every k-th write. Every
 record still reaches the operating system before the write returns, so
 a crash of the process loses nothing, but up to k − 1 writes can be lost
-if the machine loses power. That's the same trade SQLite makes with
+if the machine loses power. SQLite makes a similar trade with
 `synchronous=NORMAL`. It isn't group commit, where several clients share
 one fsync and each still waits for it, because this database has one
 client and no transactions to group.
@@ -471,8 +471,9 @@ the same data with the same eps.
 | uniform | 79 segments, 1,896 bytes | 57 segments, 1,368 bytes | 57 segments, 984 bytes |
 | skewed | 157 segments, 3,768 bytes | 126 segments, 3,024 bytes | 126 segments, 2,192 bytes |
 
-Mine is faster on skewed data on both machines, and about even on uniform
-data. That's recent: before the branchless segment search described above,
+These use the read-only model over a dense array, without the gapped array's
+empty slots or segment cap. Mine is faster on skewed data on both machines, and
+about even on uniform data. That's recent: before the branchless segment search described above,
 PGM was clearly faster on uniform data (89.5 vs 124.0 ns, in an earlier
 session). I left PGM's code as it is. At equal segment counts, the memory
 difference comes down to how segments are stored: PGM uses 16 bytes per
@@ -544,7 +545,7 @@ either way.
 The laptop's 10M number needs a warning. Five days earlier, the same benchmark
 on the same laptop measured 1.02–1.08x, and I wanted to know why. So I ran the
 10M uniform benchmark as 14 separate processes in one sitting, and got anything
-from 1.11x to 1.47x. The speedups fall into two clusters, 1.11–1.20x and
+from 1.11x to 1.47x, so with the earlier run the range is 1.02–1.47x. The speedups fall into two clusters, 1.11–1.20x and
 1.34–1.47x, mostly because the gapped array takes either about 290 or about
 350 ns. It isn't transparent huge pages, because both clusters show up with
 them on and off, and I haven't worked out what it is. Interleaving passes
@@ -646,7 +647,7 @@ The spread order shows the cost described in "Supporting inserts":
 The slots re-laid don't depend on the machine. On uniform keys the two orders
 draw from the same distribution, and the times match on both machines.
 Everywhere else, spreading the inserts makes the gapped array 1.6–3.4x slower,
-while tlx stays the same or gets up to 3.1x faster, presumably because the new
+while tlx stays about the same on books and gets 1.2–3.1x faster on the others, presumably because the new
 keys land in a few leaves that stay in cache.
 
 ### The whole database on each index
@@ -654,7 +655,7 @@ keys land in a few leaves that stay in cache.
 The benchmarks above time the index on its own. `cpp/engine_benchmark.cpp`
 runs the whole database through SQL instead, on a table of
 `(id INT, val INT)` rows, and is built twice: once on the learned index
-and once on tlx's B+-tree, with everything else the same. The two builds
+and once on tlx's B+-tree at its default node size, with everything else the same. I tuned tlx's node size for the storage-level benchmarks above but not here, so a tuned tree might narrow what's left of the gap. The two builds
 can't take turns inside one run, so each one ran three times,
 alternating, and these are the medians. The log was on a tmpfs, so fsync
 costs nothing except in the durable-insert rows.
@@ -714,6 +715,14 @@ where the table has few keys, the learned index is 1.6–1.9x slower on
 skewed data and up to 3.3x slower on the real datasets (fb), for the
 reason described in "Supporting inserts".
 
+These mixes have a flaw. They run one after another on the same table, so the
+spread-evenly mix starts with about 110,000 more rows than the first one did,
+about a tenth of the table at 1M keys and 1% at 10M, and that pushes the gapped
+array closer to its density limits. It's a likely reason the two 50/50 mixes
+differ on uniform 1M keys, where their inserts should behave alike. The
+storage-level "spread" numbers above build fresh structures for each order, so
+they don't have this problem, and they show the same effect on skewed data.
+
 For durable writes, the index doesn't matter. On AWS, where nearly every run's
 durable insert took 2.7 ms, the medians on the two indexes match to within 1% on
 all seven datasets. Syncing every 64 writes brings that down to about 47 µs,
@@ -727,7 +736,7 @@ itself.
 
 On the four real datasets (one run of each build, so noisier), a pre-parsed
 point lookup ranged from even to 1.20x faster on the learned index, a parsed
-one from 10% slower to 7% faster, appends were 2.3–3.3x slower, and inserts
+one from 10% slower to 7% faster, appends were 2.3–3.4x slower, and inserts
 spread evenly over the key range were up to 3.3x slower. The full tables, with
 the lowest and highest of the three runs for the synthetic data, are in
 `engine_summary.md` in each run's directory.

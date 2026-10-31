@@ -3,26 +3,21 @@
 \usepackage{booktabs}
 \usepackage{amsmath}
 \usepackage{url}
-\usepackage{xcolor}
 \usepackage[hidelinks]{hyperref}
-
-% Marks a number that still has to come from the final benchmark run.
-\newcommand{\tbd}[1]{\textcolor{red}{[#1]}}
 
 \begin{document}
 
-\title{Learned Index or B+-Tree? An End-to-End Comparison\\
-in an Embedded SQL Engine}
+\title{Learned Index or B+-Tree?\\
+An End-to-End Comparison in an Embedded SQL Engine}
 
-\author{\IEEEauthorblockN{Aadit Sood}
-\IEEEauthorblockA{University of Maryland, College Park}}
+\author{\IEEEauthorblockN{Aadit Sood}}
 
 \maketitle
 
 \begin{abstract}
 Learned indexes answer point lookups faster than B-trees when measured on
-their own, but a database query also has to be parsed, planned, logged
-and turned back into a row. We built a small embedded SQL engine whose
+their own, but a database also has to parse and plan each statement, log each
+write, and turn index entries back into rows. We built a small embedded SQL engine whose
 storage engine is a learned index (piecewise-linear segments over a
 gapped array, with packed-memory-array rebalancing), and made the index
 swappable at compile time for a well-known B+-tree library with nothing
@@ -37,7 +32,7 @@ follow the key distribution are up to 3.3x slower. Durable writes are
 dominated by fsync whichever index is used, even with batching; opening the
 database from a snapshot is 1.4--1.7x faster on the learned index, and memory
 per row is about the same. On one machine, the lookup speedup at 10M keys
-ranged from 1.11x to 1.47x between runs of the same program, which interleaved
+ranged from 1.02x to 1.47x between runs of the same program, which interleaved
 measurement within a process cannot detect. We also describe two performance
 problems that stayed hidden while the index was compared only with weak
 baselines, and the differential testing against SQLite that both builds pass.
@@ -80,17 +75,18 @@ increasing order, inserts that follow or depart from the existing key
 distribution, durable writes with and without batched fsync, recovery time,
 and memory per row.
 
-The short answer is that most of the advantage does not survive. The
+Most of that advantage does not survive inside the engine. The
 learned index is 1.5--1.9x faster than tlx at the storage layer on 1M
-keys, but a point query through SQL is only 6--20\% faster when it was parsed
-ahead of time, and about even when it is parsed each time, mostly because the
-lookup is a small part of what the query costs. Range scans and random
+keys, but at that size a point query through SQL is only 6--9\% faster when it
+was parsed ahead of time, and about even when it is parsed each time, mostly
+because the lookup is a small part of what the query costs. Range scans and random
 inserts are even. The learned index's known weaknesses, on the other
 hand, carry through: appends are 1.5--3.4x slower, and inserts that
 land where the data is sparse are up to 3.3x slower. Durable writes are
-dominated by fsync on either index. The learned index's clearest gains
-inside the engine are in startup time and in read-heavy workloads after
-inserts, where the B+-tree's split leaves slow it down.
+dominated by fsync on either index. The learned index's largest gain inside
+the engine is on lookups for ids that are not in the table (1.7--2.5x), and it
+also gains in startup time and in read-heavy workloads after inserts, where the
+B+-tree's split leaves slow it down.
 
 None of the index's techniques are new, and the paper does not claim them.
 The segmentation is the greedy method of FITing-tree~\cite{galakatos2019},
@@ -106,8 +102,7 @@ reads, writes, durability, recovery and memory, on synthetic data and on
 four real datasets from the SOSD benchmark (Section~\ref{sec:results});
 \item an account of two performance problems that stayed invisible while
 the index was compared only against weak baselines, and of the testing that
-caught correctness bugs, offered as methodology for others building similar
-systems (Section~\ref{sec:lessons}).
+caught correctness bugs (Section~\ref{sec:lessons}).
 \end{itemize}
 The code, the benchmark scripts and the raw output of every run reported
 here are public.
@@ -207,8 +202,8 @@ slot, every key the model was fit on stays within $2\epsilon$ of its
 prediction. When a segment's region is too full to refresh (90\%), the
 refresh widens to aligned windows of two, four, eight segments, with
 density limits that fall from 0.9 for one segment to 0.8 for the whole
-array, as in a packed-memory array~\cite{itai1981,bender2000}. Only an array
-more than 80\% full is rebuilt, larger. The last segment can instead grow
+array, as in a packed-memory array~\cite{itai1981,bender2000}. The whole array
+is rebuilt at a larger size only when it is more than 80\% full. The last segment can instead grow
 the array at its end, by a quarter of its size at a time, which is what
 keys arriving past the end use.
 
@@ -219,7 +214,7 @@ setting $k > 1$, only every $k$-th record is fsync'd, and the log is synced
 on close and before a checkpoint empties it. Every record still reaches the
 operating system before the write returns, so a crash of the process loses
 nothing; up to $k-1$ acknowledged writes can be lost if the machine loses
-power. SQLite makes the same trade with \texttt{synchronous=NORMAL}. This
+power. SQLite makes a similar trade with \texttt{synchronous=NORMAL}. This
 is not group commit in the usual sense, in which concurrent clients share
 an fsync and each still waits for it: the engine has one client and no
 multi-statement transactions.
@@ -229,8 +224,10 @@ multi-statement transactions.
 
 The storage layer refers to its index through a single type alias. A
 compile-time switch replaces the gapped array with a thin wrapper around
-tlx's \texttt{btree\_map}~\cite{tlx}, which stores each row next to its key
-in the tree's leaves, as the gapped array does in a parallel array. tlx's
+tlx's \texttt{btree\_map}~\cite{tlx}. tlx stores each row next to its key in
+the tree's leaves, while the gapped array keeps rows in a separate array. This
+build uses tlx's default node settings, which here means 8 rows per leaf and 16
+children per inner node; we did not tune them for the engine. tlx's
 B+-tree is the successor of the stx B+-tree used by SOSD. The parser,
 executor, catalog, log and snapshot code are identical in both builds; the
 only other difference is the text of \texttt{EXPLAIN}. Both builds pass the
@@ -268,8 +265,9 @@ timed. Within one program, each pass times every structure once, in turn,
 and results are medians over seven passes; an earlier version that timed
 structures one after another produced differences of more than 10\% for
 the same structure depending on when it ran. The two builds of the engine
-are separate programs, so each engine experiment runs three times per build,
-alternating, and reports medians. On the laptop the same measurement moves
+are separate programs, so each engine experiment on synthetic data runs three
+times per build, alternating, and reports medians; the real datasets run once
+per build. On the laptop the same measurement moves
 by 10--20\% between runs, so differences smaller than that are not
 meaningful; AWS was much steadier. One script reruns every experiment and
 records the machine, compiler and commit next to the raw output.
@@ -281,9 +279,10 @@ separate processes. The speedup over tlx ranged from 1.11x to 1.47x, in two
 clusters (1.11--1.20x and 1.34--1.47x), mostly because the gapped array took
 either about 290 or about 350~ns. Both clusters appeared with transparent huge
 pages disabled and with the default setting, so huge pages do not explain it,
-and we have not established the cause. A run of the full script five days
-earlier on the same laptop measured 1.02--1.08x at 10M keys, lower still. We
-therefore read the laptop's 10M lookup speedups as a range. We did not repeat
+and the cause is unknown. A run of the full script five days earlier on the same
+laptop, with the same index and lookup code, measured 1.02--1.08x at 10M keys, so
+the observed range is 1.02--1.47x. We therefore read the laptop's 10M lookup
+speedups as a range. We did not repeat
 this experiment on AWS, though its separate engine runs agree closely.
 
 \section{Results}
@@ -292,9 +291,11 @@ this experiment on AWS, though its separate engine runs agree closely.
 All numbers in this section come from two runs of the benchmark script at
 commit \texttt{ab67357}, one per machine. Speedups are the B+-tree's time
 divided by the learned index's, so values above 1 favor the learned
-index. ``tlx'' is tlx's B+-tree with 512-byte nodes, its fastest setting
-for lookups on the laptop among node sizes from 128 bytes to 2 KB; we did not
-repeat that tuning on AWS.
+index. At the storage level (Table~\ref{tab:index}, Table~\ref{tab:spread}),
+``tlx'' is tlx's B+-tree with 512-byte nodes, its fastest setting for lookups on
+the laptop among node sizes from 128 bytes to 2 KB; we did not repeat that tuning
+on AWS. The whole-engine comparison (Table~\ref{tab:engine}) uses tlx's default
+node settings instead (Section~\ref{sec:btree}).
 
 \subsection{The index on its own}
 
@@ -344,10 +345,11 @@ takes 0.006--0.07 bytes per key, against 0.25 for tlx's inner nodes (0.53
 with its default 256-byte nodes), but the gapped array as a whole takes
 11.4--11.5 bytes per key, against 8.6 for the packed tlx tree, because a
 third of its slots are empty. Against the published PGM-index on 1M
-keys~\cite{ferragina2020}, the pinned segmentation took 89.4 and 92.8~ns
-on uniform and skewed data on the laptop, and the PGM-index 92.9 and
-112.1~ns; on AWS, 72.1 and 75.4~ns against 70.9 and 87.7~ns. We read that as
-even on uniform data and in the learned index's favor on skewed data.
+keys~\cite{ferragina2020}, the pinned segmentation over a dense array, without
+the gapped array's empty slots or its cap on segment length, took 89.4 and
+92.8~ns on uniform and skewed data on the laptop, and the PGM-index 92.9 and
+112.1~ns; on AWS, 72.1 and 75.4~ns vs.\ 70.9 and 87.7~ns. We read that as
+even on uniform data and in the pinned segmentation's favor on skewed data.
 
 \subsection{Reads inside the engine}
 
@@ -362,16 +364,17 @@ simply carries through, since the store's lookups differ by 50 and 35~ns on
 uniform and skewed data and the pre-parsed queries by 43 and 35~ns. It does not
 carry through everywhere, though: at 10M uniform keys on AWS it shrinks from 173
 to 112~ns, and on fb from 130 to 18~ns. Parsing shrinks it further and sometimes
-reverses it, although a fixed extra cost should leave it unchanged. We have not
-established why. Lookups for ids that are not in the table are 1.7--2.5x faster
-on the learned index on every dataset and on both machines; we have not
-established why either. Range scans are even at every length (0.92--1.13x at 10
+reverses it, although a fixed extra cost should leave it unchanged, and we do not
+know why. Lookups for ids that are not in the table are 1.7--2.5x faster on the
+learned index on every dataset and on both machines; this too is unexplained.
+Range scans are even at every length (0.92--1.13x at 10
 rows, 0.97--1.06x at 100 and 1,000), since decoding the rows dominates.
 
 \begin{table*}[t]
-\caption{The whole engine on each index: the B+-tree's time over the learned
-index's, from medians of three alternating runs of each build. Memory is in
-bytes per row, learned index / tlx.}
+\caption{The whole engine on each index, with tlx at its default node settings:
+the B+-tree's time over the learned index's, from medians of three alternating
+runs of each build. In every column, memory per row after opening from a snapshot
+is 89.2 bytes on the learned index and 94.3 on tlx.}
 \label{tab:engine}
 \centering
 \small
@@ -393,8 +396,6 @@ insert, appended & 0.54 & 0.53 & 0.30 & 0.67 & 0.67 & 0.43 \\
 durable insert, fsync every write & 1.43 & 0.94 & 1.10 & 1.00 & 1.00 & 1.00 \\
 durable insert, fsync every 64 writes & 1.43 & 1.25 & 1.22 & 0.99 & 0.99 & 0.99 \\
 open from a snapshot & 1.56 & 1.65 & 1.42 & 1.74 & 1.74 & 1.45 \\
-\midrule
-memory per row from a snapshot & 89.2 / 94.3 & 89.2 / 94.3 & 89.2 / 94.3 & 89.2 / 94.3 & 89.2 / 94.3 & 89.2 / 94.3 \\
 \bottomrule
 \end{tabular}
 \end{table*}
@@ -403,39 +404,48 @@ memory per row from a snapshot & 89.2 / 94.3 & 89.2 / 94.3 & 89.2 / 94.3 & 89.2 
 
 Random-order inserts through SQL are even (0.96--1.03). At the storage
 level the gapped array takes 375 and 408~ns per insert on uniform and skewed
-1M keys on the laptop, against 277 and 322~ns for tlx, and 336 and 347~ns on
-AWS against 271 and 263~ns (each a single timed pass, so noisier than the
-lookups); that difference disappears in the 2.5--4.0~$\mu$s an insert costs
+1M keys on the laptop, vs.\ 277 and 322~ns for tlx, and 336 and 347~ns on
+AWS vs.\ 271 and 263~ns (each a single timed pass, so noisier than the
+lookups); that difference disappears in the 2.4--4.0~$\mu$s an insert costs
 through SQL. Appends past the end of the key range, the pattern of an
 auto-increment primary key, are 1.5--3.4x slower on the learned index. At the
-storage level the gap is larger, 11 to 15 times (415--553~ns against 36--37~ns
-for tlx), because a B+-tree
-appends by touching only its rightmost leaf, while the gapped array keeps
+storage level the gap is larger, 11 to 15 times (415--553~ns vs.\ 36--37~ns
+for tlx), because a B+-tree appends by touching only its rightmost leaf, while the gapped array keeps
 shifting keys at its end and refreshing its last segment.
 
 The mixed workloads separate two kinds of insert. When new ids are drawn
 between existing ones, so that they follow the data's distribution, a
 read-heavy mix (95\% reads) is 1.16--1.45x faster on the learned index,
 which is consistent with tlx's lookups slowing down as its leaves split. When new
-ids are drawn evenly from the whole key range, the learned index is 1.6--1.9x
-slower on skewed data. Table~\ref{tab:spread} shows why at the
+ids are drawn evenly from the whole key range, in the 50/50 mix, the learned index
+is 1.6--1.9x slower on skewed data. Table~\ref{tab:spread} shows why at the
 storage level. Skewed data leaves a few segments that cover most of the
 key range but hold few keys; evenly spread inserts pour into their small
 regions, which fill at once and keep borrowing room from their
-neighbors, so each insert re-lays far more of the array.
+neighbors, so each insert rewrites far more of the array.
+
+These mixes have a flaw: they run one after another on the same table, so the
+evenly spread mix starts with about 110,000 more rows than the first mix did,
+about a tenth of the table at 1M keys and 1\% at 10M. That pushes the gapped array
+closer to its density limits. It is a likely reason the two 50/50 mixes differ on
+uniform 1M keys (1.02 vs.\ 0.78 and 0.86), where their inserts should behave
+alike, so the spread-evenly figures in Table~\ref{tab:engine} should be read with
+that in mind, especially at 1M keys. Table~\ref{tab:spread} builds fresh structures for each order and
+does not have this problem, and it shows the same effect on skewed data.
 
 \begin{table*}[t]
 \caption{Inserting 10\% more keys at the storage level, either drawn
 from the data or drawn evenly from the whole key range, in random order
-(ns per insert, learned / tlx, and slots the gapped array re-lays per
-insert, which do not depend on the machine). Each is a single timed pass.}
+(ns per insert, learned / tlx). The last column gives the slots the gapped array
+rewrites per insert, from the data $\to$ spread evenly, which do not depend on the
+machine. Each is a single timed pass.}
 \label{tab:spread}
 \centering
 \small
 \begin{tabular}{lrrrrr}
 \toprule
 & \multicolumn{2}{c}{Laptop} & \multicolumn{2}{c}{AWS} & \\
-Data & From the data & Spread evenly & From the data & Spread evenly & Slots re-laid \\
+Data & From the data & Spread evenly & From the data & Spread evenly & Slots rewritten \\
 \midrule
 uniform 1M & 375 / 277 & 375 / 273 & 336 / 271 & 333 / 265 & 49 $\to$ 48 \\
 skewed 1M & 408 / 322 & 1,066 / 145 & 347 / 263 & 898 / 116 & 49 $\to$ 161 \\
@@ -449,15 +459,15 @@ wiki 10M & 569 / 513 & 898 / 402 & 504 / 456 & 830 / 384 & 35 $\to$ 71 \\
 
 On uniform keys the two kinds of insert draw from the same distribution,
 and the times match on both machines. Everywhere else, spreading the inserts
-makes the gapped array 1.6--3.4x slower, raises the slots it re-lays per insert
+makes the gapped array 1.6--3.4x slower, raises the slots it rewrites per insert
 by up to 43 times, and forces refreshes that borrow from neighboring segments
 (between 24 and 1,814 of them, against none when the inserts follow the
-data). tlx stays about the same on books and wiki and gets faster on the
-others, by up to 3.1x, presumably because the new keys land in a few
+data). tlx stays about the same on books (1.02--1.12x faster) and gets 1.2--3.1x
+faster on the others, presumably because the new keys land in a few
 leaves that stay in cache.
 
-Concentrating all inserts into a narrow key range (1.2--5\% of it) made
-them 57--80\% slower than spreading them out (536--643 against 330--374~ns;
+On 900K uniform keys, concentrating 100K inserts into a narrow key range (1.2--5\%
+of it) made them 57--80\% slower than spreading them out (536--643 vs.\ 330--374~ns;
 medians of nine interleaved rounds), more so as the range narrows,
 with no full rebuilds. This is a far weaker attack than published ones on
 learned indexes~\cite{yang2024}; we did not attempt a targeted one.
@@ -468,7 +478,8 @@ With an fsync on every write, the index makes no measurable difference. On
 AWS, where nearly every run's durable insert took 2.7~ms, the medians on the two
 indexes match to within 1\% on all seven datasets. The laptop's SSD is much
 noisier: medians of 2.0--2.9~ms, with single runs from 1.6 to 4.0~ms, so its
-speedups in Table~\ref{tab:engine} reflect the disk rather than the index.
+speedups in both durable-insert rows of Table~\ref{tab:engine} reflect the disk
+rather than the index.
 Batching helps as expected: on 1M uniform keys, fsyncing every 8, 64 and 512
 writes brings the learned index's insert to 343, 47 and 9.1~$\mu$s on AWS (343,
 47 and 8.8~$\mu$s for tlx), approaching the 3.6~$\mu$s an insert costs there with
@@ -477,12 +488,12 @@ no fsync at all.
 \subsection{Startup and memory}
 
 Opening the engine from a snapshot is 1.4--1.7x faster on the learned
-index (129 against 201~ms at 1M rows on the laptop, 1.6 against 2.3~s at 10M),
+index (129 vs.\ 201~ms at 1M rows on the laptop, 1.6 vs.\ 2.3~s at 10M),
 and from the log, which the engine folds into the snapshot's rows before a
-single build, 1.4--1.6x faster. Laying out a sorted array is cheaper than
+single build, 1.35--1.57x faster. Laying out a sorted array is cheaper than
 building a tree; the B+-tree wrapper also makes a second pass to move the
 rows into the leaves, because tlx's bulk load copies its input. Memory
-per row is about the same once both are built from a snapshot (89 against
+per row is about the same once both are built from a snapshot (89 vs.\
 94 bytes; most of a row is the row itself), and 23--30\% lower on the
 learned index after a load by random-order inserts, which leaves tlx's
 leaves partly empty.
@@ -492,7 +503,7 @@ leaves partly empty.
 On the four SOSD datasets (one run of each build at 10M keys, so noisier
 than the medians above), a pre-parsed point query ranged from even to 1.20x
 faster on the learned index, a parsed one from 10\% slower to 7\% faster, appends
-were 2.3--3.3x slower (speedup 0.30--0.43), the read-heavy mix following the data
+were 2.3--3.4x slower (speedup 0.30--0.43), the read-heavy mix following the data
 was 1.19--1.59x faster, and inserts spread evenly over the key range ranged from
 1.22x faster (books) to 3.3x slower (fb).
 
@@ -519,10 +530,10 @@ select each half with a conditional move cut it from about 48 to about
 the PGM-index from a clear loss on uniform data to a tie.
 
 \paragraph{An invariant's test must fail without the mechanism} A test of
-the $2\epsilon$ drift bound passed with the neighbor counting removed. The
-nearest-gap search alternates sides, which limits how far shifts push into a
-neighbor unless the neighbor has a long run of empty slots at its edge. Only
-after the test deleted keys next to a segment boundary did it fail without
+the $2\epsilon$ drift bound passed with the neighbor counting removed. Each shift
+goes toward the nearest gap, so keys rarely move far into a neighboring segment
+unless it has a long run of empty slots at its edge. Only after the test deleted
+keys next to a segment boundary, which creates such a run, did it fail without
 the counting (worst error $2.47\epsilon$) and pass with it.
 
 \paragraph{Differential testing found what unit tests did not} Running
@@ -537,7 +548,7 @@ constantly.
 \paragraph{The best number came from a broken dataset} An early skewed
 dataset collapsed into a run of consecutive integers, which a single line
 fits exactly, and produced the project's fastest lookups. Looking at the
-gaps between keys, which nobody had done, would have caught it immediately.
+gaps between keys would have caught it immediately.
 
 \section{Limitations}
 \label{sec:limits}
@@ -545,9 +556,11 @@ gaps between keys, which nobody had done, would have caught it immediately.
 All results come from two machines, neither of them bare metal: a laptop under
 WSL2 and an AWS virtual machine that may share its cache with other tenants, on
 network storage, with threads not pinned to cores. We did not establish what
-causes the variation between processes on the laptop, or test for it on AWS. tlx's node size
-was tuned only on the laptop. The engine keeps everything in memory and reads its whole snapshot
-on startup, unlike disk-based engines that load pages on demand. It has one
+causes the variation between processes on the laptop, or test for it on AWS. tlx's
+node size was tuned only on the laptop and only at the storage level; the engine
+comparison uses its default settings. The engine's mixed workloads share one
+table, so later ones start with more rows. The engine keeps everything in memory
+and reads its whole snapshot on startup, unlike disk-based engines that load pages on demand. It has one
 client, no multi-statement transactions and no joins. Only one B+-tree
 (tlx) and one learned index design are compared; an updatable learned index
 such as ALEX inside the same engine would be a natural next comparison. The
@@ -558,13 +571,14 @@ comparison relies on alternating runs rather than interleaved passes.
 \section{Conclusion}
 
 Swapping only the index under one engine shows how much of a learned
-index's advantage reaches the user of a small embedded database: a 1.5--1.9x
-faster lookup at the storage layer becomes a 6--20\% faster query when it was
-parsed ahead of time, and about even when it was not, while the learned index's
+index's advantage reaches the user of a small embedded database: at 1M keys, a
+1.5--1.9x faster lookup at the storage layer becomes a 6--9\% faster query when it
+was parsed ahead of time, and about even when it was not, while the learned index's
 weaknesses on appends and on inserts that depart from the data's distribution
 carry through. The two machines agree on this, even where their absolute times
 differ. For an engine like this one, a learned index is not a clear win over a
-tuned B+-tree. It trades slightly faster lookups, faster startup and better
+B+-tree library, even one left at its default node settings; tuning the engine's
+tree might narrow the remaining gap, which we did not test. It trades slightly faster lookups, faster startup and better
 behavior after random inserts for much slower appends and a sensitivity to where
 inserts land. The obvious next steps are an updatable learned index such as ALEX
 in the same engine, a disk-resident version, and measurements on bare metal.
@@ -579,7 +593,6 @@ were made at commit \texttt{ab67357}, and their output is in
 \texttt{results/runs/2026-10-31\_0514} (AWS). The variation experiment is in
 \texttt{results/experiments}, and the earlier laptop run in
 \texttt{results/runs/2026-10-26\_1522}.
-\tbd{Zenodo DOI of the tagged release.}
 
 \bibliographystyle{IEEEtran}
 \bibliography{refs}
